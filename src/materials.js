@@ -239,6 +239,7 @@ export function createMaterials(renderer) {
     cushion: std(0xd9d3c8, 0.97),
     walnut: new THREE.MeshStandardMaterial({ map: oak({ base: [26, 34, 36], seed: 12 }), roughness: 0.55 }),
     rug: std(0xd8d1c4, 1.0),
+    customPiece: std(0xc9c2b6, 0.8),
     lampShade: std(0xf6f1e6, 0.9, { emissive: 0xfff1d6, emissiveIntensity: 0.25 }),
     screen: std(0x111213, 0.15),
     plant: std(0x5f7a52, 0.9),

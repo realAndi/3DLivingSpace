@@ -5,7 +5,7 @@ import { createMaterials } from './materials.js';
 import { buildArchitecture, openings } from './architecture.js';
 import { buildKitchen, KITCHEN_BLOCKS } from './kitchen.js';
 import { buildBaths, BATH_BLOCKS } from './baths.js';
-import { buildFurniture, FURNITURE_BLOCKS } from './furniture.js';
+import { LayoutEditor } from './layout.js';
 import { buildSurroundings } from './surroundings.js';
 import { WalkControls } from './walk.js';
 import { ROOMS, ZONES, PHOTOS, PLAN_IMAGE, HEIGHT, UNIT, WALLS, ROOM_VIEWS, X, Z } from './plan.js';
@@ -49,7 +49,9 @@ const M = createMaterials(renderer);
 const arch = buildArchitecture(M);
 const kitchen = buildKitchen(M);
 const baths = buildBaths(M);
-const furniture = buildFurniture(M);
+// Pieces placed with the furniture planner (src/layout.js) live in this group.
+const furniture = new THREE.Group();
+furniture.name = 'furniture';
 const city = buildSurroundings();
 const doors = arch.doors;
 doors.forEach((d) => { d.openTo = d.angle > 10 ? d.angle : d.id === 'wic' ? 80 : 90; });
@@ -137,7 +139,7 @@ const insideUnit = (x, z) => ROOMS.some((r) => pointInPoly(x, z, r.poly)) || thr
 function isBlocked(x, z, r) {
   if (!insideUnit(x, z)) return true;
   if (STATIC_BLOCKS.some((b) => inRect(x, z, b, r))) return true;
-  if (furniture.visible && FURNITURE_BLOCKS.some((b) => inRect(x, z, b, r * 0.6))) return true;
+  if (furniture.visible && layout.blocks(x, z, r * 0.6)) return true;
   return doors.some((d) => d.angle < 20 && inRect(x, z, d.closedRect, r));
 }
 
@@ -344,6 +346,29 @@ function focusRoom(id) {
 }
 
 // ---------------------------------------------------------------------------
+// Furniture planner
+const layout = new LayoutEditor({
+  M, scene, root: furniture, canvas, stage, accentMat, fmt, insideUnit, invalidate,
+  getCamera: () => activeCam(),
+  getMode: () => mode,
+  obstacles: () => STATIC_BLOCKS,
+  occluders: () => [arch.walls, kitchen.solid, baths.solid, ...doors.map((d) => d.pivot)],
+  onSelect: (id) => { stage.classList.toggle('piece-active', id != null); if (id != null) dismissHint(); },
+  onAdded: () => { if (narrow()) setSheet(false); },
+  onEdit: () => {
+    openTab('t-furniture');
+    $('#pieceEditor').scrollIntoView({ block: 'nearest' });
+  },
+  onFocusPiece: (item) => {
+    if (!item) return;
+    if (narrow()) setSheet(false);
+    const t = new THREE.Vector3(item.x, 0, item.z);
+    if (mode === 'plan') tweenOrbit(plan, planCam, t, new THREE.Vector3(item.x, planCam.position.y, item.z));
+    else if (mode === 'dollhouse') tweenOrbit(doll, dollCam, t, dollCam.position.clone().add(t.clone().sub(doll.target)));
+  },
+});
+
+// ---------------------------------------------------------------------------
 // Photo matching
 let photo = null;
 let furnitureBeforePhoto = null;
@@ -380,6 +405,7 @@ function showPhoto(id, { opacity = 50, instant = false } = {}) {
   photo = p;
   if (furnitureBeforePhoto === null) furnitureBeforePhoto = furniture.visible;
   furniture.visible = false;
+  layout.select(null);
   overlay.src = p.src;
   overlay.hidden = false;
   fade.value = opacity;
@@ -429,6 +455,8 @@ $('#clearMeasure').addEventListener('click', () => {
 });
 function setMeasuring(on) {
   measuring = on;
+  layout.enabled = !on;
+  if (on) layout.select(null);
   measureBtn.setAttribute('aria-pressed', String(on));
   measureBtn.textContent = on ? 'Measuring: tap two points' : 'Measure a distance';
   stage.classList.toggle('measuring', on);
@@ -632,6 +660,7 @@ const HINTS = {
 const hint = $('#hint');
 let hintTimer = 0;
 function showHint() {
+  if (layout?.selected != null) return;
   hint.textContent = HINTS[mode];
   hint.classList.remove('gone');
   clearTimeout(hintTimer);
@@ -695,18 +724,20 @@ $('#recenter').addEventListener('click', () => {
 
 // ---------------------------------------------------------------------------
 // Panel: tabs, toggles, bottom sheet
-document.querySelectorAll('.tab').forEach((t) => t.addEventListener('click', () => {
+function openTab(id) {
   document.querySelectorAll('.tab').forEach((x) => {
-    const on = x === t;
+    const on = x.id === id;
     x.setAttribute('aria-selected', String(on));
     $(`#${x.getAttribute('aria-controls')}`).hidden = !on;
   });
   if (narrow()) setSheet(true);
-}));
+}
+document.querySelectorAll('.tab').forEach((t) => t.addEventListener('click', () => openTab(t.id)));
 
 $('#optFurniture').addEventListener('change', (e) => {
   if (photo) furnitureBeforePhoto = e.target.checked;
   else furniture.visible = e.target.checked;
+  layout.select(null);
   invalidate();
 });
 $('#optLabels').addEventListener('change', (e) => { showLabels = e.target.checked; invalidate(); });
@@ -804,6 +835,7 @@ function frame(now = performance.now()) {
   needsRender = false;
   renderer.render(scene, activeCam());
   updateLabels();
+  layout.updateOverlay(activeCam());
   drawMinimap();
   updateScalebar();
   if (!shown) { shown = true; $('#loading').classList.add('done'); window.app.ready = true; }
@@ -825,7 +857,7 @@ if (!narrow()) setSheet(false);
 window.app = {
   ready: false,
   setMode, showPhoto, exitPhoto, focusRoom, toggleDoor, invalidate,
-  walk, doors, setSheet,
+  walk, doors, setSheet, layout,
   setFade(v) { fade.value = v; overlay.style.opacity = String(v / 100); },
   setPhotoCam(cam) {
     if (!photo) return;
@@ -845,6 +877,12 @@ window.app = {
     city.visible = !on && mode === 'walk';
     scene.background = on ? new THREE.Color(0x000000) : (mode === 'walk' ? null : bgColor);
     invalidate();
+  },
+  // Screen position of a world point in the current view (for scripted tests).
+  project(x, y, z) {
+    const p = project(x, y, z, activeCam());
+    const r = canvas.getBoundingClientRect();
+    return [p.x + r.left, p.y + r.top];
   },
   get mode() { return mode; },
 };

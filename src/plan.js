@@ -144,33 +144,6 @@ export const ROOM_VIEWS = {
 };
 
 // ---------------------------------------------------------------------------
-// Sample staging, traced from the furniture drawn on the leasing plan.
-// Boxes are [x0, z0, x1, z1] in plan px; `face` is the direction the piece faces.
-export const FURNITURE = [
-  { type: 'bed', px: [780, 85, 920, 255], face: 'S', size: 'queen' },
-  { type: 'nightstand', px: [723, 85, 775, 123], face: 'S', lamp: true },
-  { type: 'nightstand', px: [922, 85, 974, 123], face: 'S', lamp: true },
-  { type: 'dresser', px: [800, 331, 930, 366], face: 'N', tv: true },
-
-  { type: 'bed', px: [112, 142, 278, 280], face: 'E', size: 'queen' },
-  { type: 'nightstand', px: [110, 84, 148, 136], face: 'E', lamp: true },
-  { type: 'nightstand', px: [110, 286, 148, 338], face: 'E', lamp: true },
-
-  { type: 'sofa', px: [825, 380, 975, 447], face: 'S' },
-  { type: 'sidetable', px: [981, 382, 1033, 434], face: 'S', lamp: true },
-  { type: 'armchair', px: [977, 500, 1035, 570], face: 'W' },
-  { type: 'coffeetable', px: [847, 507, 955, 562], face: 'S' },
-  { type: 'console', px: [865, 665, 992, 699], face: 'N', tv: true },
-  { type: 'rug', px: [835, 470, 1000, 610], face: 'S' },
-
-  { type: 'table', px: [685, 487, 787, 552], face: 'S' },
-  { type: 'chair', px: [717, 466, 755, 490], face: 'S' },
-  { type: 'chair', px: [717, 549, 755, 573], face: 'N' },
-  { type: 'chair', px: [662, 501, 686, 539], face: 'E' },
-  { type: 'chair', px: [786, 501, 810, 539], face: 'W' },
-];
-
-// ---------------------------------------------------------------------------
 // The photos, with the camera pose that reproduces each one in the model.
 // yaw is a compass bearing (0 = plan north/up, 90 = east); pitch and roll in
 // degrees. Poses were solved against the traced walls (corners and floor and

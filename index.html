@@ -240,6 +240,82 @@ h1 {
 .loading.done { opacity: 0; pointer-events: none; }
 .error { max-width: 36ch; text-align: center; text-transform: none; letter-spacing: 0; font: 400 14px/1.5 var(--font-ui); color: var(--ink); padding: 24px; }
 
+/* ---------- Furniture ---------- */
+.tab .count { font: 500 10.5px/1 var(--font-mono); color: var(--oak); margin-left: 2px; }
+.section-note.flush { margin: 0 0 12px; }
+.catalog h3 { font: 600 12px/1 var(--font-ui); letter-spacing: 0.04em; color: var(--ink-2); margin: 16px 0 8px; }
+.catalog h3:first-child { margin-top: 4px; }
+.catalog-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.cat-btn {
+  appearance: none; cursor: pointer; text-align: left; min-width: 0;
+  border: 1px solid var(--rule); background: var(--surface); border-radius: 8px; padding: 9px 10px;
+  display: flex; flex-direction: column; gap: 3px;
+}
+.cat-btn:hover { background: var(--surface-2); border-color: var(--ink-2); }
+.cat-btn b { font-size: 13px; font-weight: 600; }
+.cat-btn small { font: 400 11px/1.2 var(--font-mono); color: var(--ink-2); }
+.fields { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin: 10px 0 12px; }
+.field { display: flex; flex-direction: column; gap: 4px; position: relative; min-width: 0; }
+.field.wide { width: 100%; }
+.field span { font: 500 10.5px/1 var(--font-mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-2); }
+.field input {
+  font: 500 14px/1 var(--font-mono); color: var(--ink); background: var(--surface-2);
+  border: 1px solid var(--rule); border-radius: 6px; padding: 9px 22px 9px 9px; width: 100%; min-width: 0;
+  font-variant-numeric: tabular-nums;
+}
+.field.wide input { font-family: var(--font-ui); padding-right: 9px; }
+.field input:disabled { opacity: 0.45; }
+.field em { position: absolute; right: 8px; bottom: 9px; font: 400 12px/1 var(--font-mono); color: var(--ink-2); font-style: normal; pointer-events: none; }
+.swatches { display: flex; flex-wrap: wrap; gap: 7px; margin: 0 0 14px; }
+.swatch { width: 26px; height: 26px; border-radius: 50%; border: 1px solid var(--rule); cursor: pointer; padding: 0; }
+.swatch[aria-pressed="true"] { outline: 2px solid var(--ink); outline-offset: 2px; }
+.layout-list { list-style: none; margin: 0 0 12px; padding: 0; display: grid; gap: 4px; }
+.piece-row {
+  appearance: none; width: 100%; cursor: pointer; text-align: left; border: 0; border-radius: 6px;
+  background: var(--surface-2); padding: 9px 10px; display: flex; justify-content: space-between; gap: 10px; align-items: baseline;
+}
+.piece-row span { font-weight: 600; font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.piece-row small { font: 400 11.5px/1 var(--font-mono); color: var(--ink-2); white-space: nowrap; }
+.piece-row[aria-current="true"] { box-shadow: inset 3px 0 0 var(--oak); }
+
+.piece-bar {
+  position: absolute; left: 50%; transform: translateX(-50%); bottom: 18px; z-index: 4;
+  display: flex; align-items: center; gap: 12px; max-width: calc(100% - 24px);
+  background: var(--surface); border-radius: 12px; padding: 8px 8px 8px 14px; box-shadow: var(--shadow);
+}
+.pb-meta { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.pb-meta b { font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pb-meta small { font: 400 11.5px/1 var(--font-mono); color: var(--ink-2); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.pb-actions { display: flex; gap: 2px; flex: none; }
+.pb-actions button {
+  appearance: none; border: 0; background: none; cursor: pointer; border-radius: 8px;
+  min-width: 38px; height: 38px; display: grid; place-items: center; color: var(--ink);
+}
+.pb-actions button:hover { background: var(--surface-2); }
+.pb-actions svg { width: 19px; height: 19px; }
+.pb-actions .pb-text { font-weight: 600; font-size: 13px; padding: 0 8px; }
+.pb-actions [data-act="done"] { background: var(--chip); color: var(--on-chip); }
+.edit-layer { position: absolute; inset: 0; pointer-events: none; z-index: 2; }
+.guide-label {
+  position: absolute; left: 0; top: 0; white-space: nowrap; pointer-events: none;
+  font: 500 11.5px/1 var(--font-mono); color: var(--ink); background: var(--surface);
+  border: 1px solid var(--oak); padding: 3px 5px; border-radius: 4px; font-variant-numeric: tabular-nums;
+}
+.banner {
+  position: absolute; left: 50%; transform: translateX(-50%); top: calc(max(16px, env(safe-area-inset-top, 0px)) + 56px); z-index: 4;
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: center;
+  background: var(--surface); border-radius: 12px; padding: 8px 8px 8px 14px; box-shadow: var(--shadow); max-width: calc(100% - 24px);
+}
+.banner span { font-size: 13px; font-weight: 600; }
+.banner .btn { padding: 7px 12px; }
+.toast {
+  position: absolute; left: 50%; transform: translateX(-50%); bottom: 84px; z-index: 6;
+  display: flex; align-items: center; gap: 12px; background: var(--chip); color: var(--on-chip);
+  border-radius: 999px; padding: 9px 10px 9px 16px; font-size: 13px; box-shadow: var(--shadow); max-width: calc(100% - 24px);
+}
+.toast:not(:has(button)) { padding-right: 16px; }
+.toast button { appearance: none; border: 0; background: none; color: var(--oak); font-weight: 700; cursor: pointer; padding: 2px 6px; }
+
 /* ---------- Phones and narrow tablets: bottom sheet ---------- */
 @media (max-width: 899px) {
   .app { grid-template-columns: 1fr; }
@@ -280,7 +356,15 @@ h1 {
   .scalebar { bottom: calc(var(--sheet-peek) + var(--safe-b) + 14px); }
   .hint { bottom: auto; top: calc(max(12px, env(safe-area-inset-top, 0px)) + 56px); max-width: calc(100% - 190px); left: 12px; transform: none; text-align: left; border-radius: 12px; }
   .joystick { bottom: calc(var(--sheet-peek) + var(--safe-b) + 20px); }
+  .stage.piece-active .joystick { bottom: calc(var(--sheet-peek) + var(--safe-b) + 84px); }
   .photo-bar { bottom: calc(var(--sheet-peek) + var(--safe-b) + 12px); }
+  .piece-bar { bottom: calc(var(--sheet-peek) + var(--safe-b) + 12px); gap: 8px; padding-left: 12px; width: calc(100% - 24px); justify-content: space-between; }
+  .pb-actions button { min-width: 36px; }
+  .toast { bottom: calc(var(--sheet-peek) + var(--safe-b) + 76px); }
+  .banner { top: calc(max(12px, env(safe-area-inset-top, 0px)) + 54px); }
+  .fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .catalog-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .tab { font-size: 12.5px; padding-left: 2px; padding-right: 2px; }
   .stage.photo-active .photo-bar { bottom: calc(var(--safe-b) + 12px); }
 }
 @media (max-width: 380px) {
@@ -309,6 +393,7 @@ h1 {
     <nav class="tabs" role="tablist">
       <button class="tab" role="tab" id="t-rooms" aria-controls="tab-rooms" aria-selected="true">Rooms</button>
       <button class="tab" role="tab" id="t-photos" aria-controls="tab-photos" aria-selected="false">Photos</button>
+      <button class="tab" role="tab" id="t-furniture" aria-controls="tab-furniture" aria-selected="false">Furniture <span class="count" id="furnitureCount"></span></button>
       <button class="tab" role="tab" id="t-tools" aria-controls="tab-tools" aria-selected="false">Tools</button>
     </nav>
     <div class="tab-body">
@@ -319,6 +404,38 @@ h1 {
       <section id="tab-photos" role="tabpanel" aria-labelledby="t-photos" hidden>
         <p class="section-note">Each photo opens the model from the spot it was taken. Slide between the photo and the model to compare.</p>
         <div class="photos" id="photoList"></div>
+      </section>
+      <section id="tab-furniture" role="tabpanel" aria-labelledby="t-furniture" hidden>
+        <div class="group" id="pieceEditor" hidden>
+          <h2>Selected piece</h2>
+          <label class="field wide"><span>Name</span><input id="peName" type="text" maxlength="40" autocomplete="off"></label>
+          <div class="fields">
+            <label class="field"><span>Width</span><input id="peW" type="number" min="1" max="360" step="0.5" inputmode="decimal"><em>in</em></label>
+            <label class="field"><span>Depth</span><input id="peD" type="number" min="1" max="360" step="0.5" inputmode="decimal"><em>in</em></label>
+            <label class="field"><span>Height</span><input id="peH" type="number" min="1" max="108" step="0.5" inputmode="decimal"><em>in</em></label>
+            <label class="field"><span>Turn</span><input id="peRot" type="number" step="15" inputmode="numeric"><em>°</em></label>
+          </div>
+          <div class="swatches" id="peSwatches" role="group" aria-label="Color"></div>
+          <div class="btn-row">
+            <button class="btn" id="peDup">Duplicate</button>
+            <button class="btn" id="peDel">Delete</button>
+          </div>
+        </div>
+        <div class="group">
+          <h2>Add a piece</h2>
+          <p class="section-note flush">Tap a piece to drop it into view, then drag it into place. Sizes are typical; change them to match yours.</p>
+          <div class="catalog" id="catalog"></div>
+        </div>
+        <div class="group">
+          <h2>Your layout</h2>
+          <ul class="layout-list" id="layoutList"></ul>
+          <p class="section-note flush" id="layoutEmpty">Nothing placed yet.</p>
+          <div class="btn-row">
+            <button class="btn" id="shareLayout">Share layout</button>
+            <button class="btn" id="clearLayout">Clear all</button>
+          </div>
+          <p class="section-note flush">Your layout saves in this browser. A share link opens the same layout on someone else's phone or computer.</p>
+        </div>
       </section>
       <section id="tab-tools" role="tabpanel" aria-labelledby="t-tools" hidden>
         <div class="group">
@@ -331,7 +448,7 @@ h1 {
         </div>
         <div class="group">
           <h2>Display</h2>
-          <label class="toggle"><span>Sample furniture<span class="why">Staging drawn on the leasing plan</span></span><input type="checkbox" id="optFurniture" checked></label>
+          <label class="toggle"><span>Show furniture<span class="why">The pieces you've placed</span></span><input type="checkbox" id="optFurniture" checked></label>
           <label class="toggle"><span>Room labels</span><input type="checkbox" id="optLabels" checked></label>
           <label class="toggle"><span>Cut walls at 4½'<span class="why">Dollhouse view</span></span><input type="checkbox" id="optCutaway"></label>
           <label class="toggle"><span>Leasing plan overlay<span class="why">Plan view, to check the tracing</span></span><input type="checkbox" id="optOverlay"></label>
@@ -383,6 +500,23 @@ h1 {
     </div>
 
     <div class="hint" id="hint"></div>
+    <div class="piece-bar" id="pieceBar" hidden>
+      <div class="pb-meta"><b id="pbName"></b><small id="pbDims"></small></div>
+      <div class="pb-actions">
+        <button data-act="ccw" aria-label="Turn left 90°" title="Turn left (Shift+R)"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M6 4.5A6.5 6.5 0 1 1 3.5 10"/><path d="M6.5 1.5 6 4.5l3 .8"/></svg></button>
+        <button data-act="cw" aria-label="Turn right 90°" title="Turn right (R)"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M14 4.5A6.5 6.5 0 1 0 16.5 10"/><path d="m13.5 1.5.5 3-3 .8"/></svg></button>
+        <button data-act="dup" aria-label="Duplicate" title="Duplicate"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="7" y="7" width="10" height="10" rx="1.5"/><path d="M13 7V4.5A1.5 1.5 0 0 0 11.5 3h-7A1.5 1.5 0 0 0 3 4.5v7A1.5 1.5 0 0 0 4.5 13H7"/></svg></button>
+        <button data-act="del" aria-label="Delete" title="Delete (Del)"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3.5 5.5h13M8 5.5V3.5h4v2M5.5 5.5l.8 11h7.4l.8-11"/></svg></button>
+        <button data-act="edit" class="pb-text">Edit</button>
+        <button data-act="done" aria-label="Done" title="Done (Esc)"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.9"><path d="m4.5 10.5 3.5 3.5 7.5-8"/></svg></button>
+      </div>
+    </div>
+    <div class="banner" id="shareBanner" hidden>
+      <span></span>
+      <button class="btn primary" id="keepShared">Keep it</button>
+      <button class="btn" id="dropShared">Use mine</button>
+    </div>
+    <div class="toast" id="toast" role="status" hidden></div>
     <canvas class="minimap" id="minimap" hidden aria-label="Mini map. Tap to move there."></canvas>
     <div class="joystick" id="joystick" hidden aria-hidden="true"><div class="knob"></div></div>
     <div class="scalebar" id="scalebar" hidden><span></span><b></b></div>
