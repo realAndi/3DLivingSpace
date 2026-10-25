@@ -22,8 +22,9 @@ who can look around and make their own version.
   The address can change that unit and no other; keep it to yourself.
 - **Dollhouse, Plan and Walk views.** Walk is first person: on a computer, click
   to look around with the mouse (Esc frees the cursor), WASD or the arrow keys
-  to move, Shift to run; on a phone, drag to look, use the pad to move, tap the
-  floor to walk there. Tap or click a door to swing it.
+  to move, Shift to run, E to open or shut the door you're facing; on a phone,
+  drag to look, use the pad to move, tap the floor to walk there. Tap or click a
+  door (or its frame) to open or shut it. Tools sets the look speed.
 - **Furnish.** Add pieces from a catalog of typical sizes, drag, turn, resize and
   recolor them. Pieces snap flush to walls, and a selected piece shows its
   clearance to the nearest wall, fixture or piece on each side.

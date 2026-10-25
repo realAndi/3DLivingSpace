@@ -3,8 +3,8 @@ const wrap = (a) => ((a % 360) + 540) % 360 - 180;
 
 // First-person controls. With a mouse, a click locks the pointer and the mouse looks
 // around like a shooter (Esc frees it). On touch, or where the lock is refused, drag to
-// look and tap the floor to walk there. WASD / arrows / joystick move.
-// Yaw is a compass bearing (0 = plan north).
+// look and tap the floor to walk there. WASD / arrows / joystick move; E interacts
+// (opens and shuts doors). Yaw is a compass bearing (0 = plan north).
 export class WalkControls {
   #enabled = false;
   #overlay = null;
@@ -13,8 +13,8 @@ export class WalkControls {
   #lockByPromise = false;
   #pendingTap = null;
 
-  constructor(camera, dom, { isBlocked, pick, onTapDoor, onUserMove, canLock = () => true, onLockChange }) {
-    Object.assign(this, { camera, dom, isBlocked, pick, onTapDoor, onUserMove, canLock, onLockChange });
+  constructor(camera, dom, { isBlocked, pick, onTapDoor, onInteract, onUserMove, canLock = () => true, onLockChange }) {
+    Object.assign(this, { camera, dom, isBlocked, pick, onTapDoor, onInteract, onUserMove, canLock, onLockChange });
     this.x = 0; this.z = 0; this.y = 5.2; this.yaw = 0; this.pitch = 0; this.roll = 0;
     this.enabled = false;
     this.keys = new Set();
@@ -23,7 +23,8 @@ export class WalkControls {
     this.tween = null;
     this.speed = 5.5;
     this.radius = 0.7;
-    this.lookSpeed = 0.12; // degrees per pixel of locked mouse movement at a 70° fov
+    this.lookSpeed = 0.15; // degrees per pixel of locked mouse movement at a 70° fov
+    this.lookScale = 1;    // the viewer's look-speed setting, a multiplier on every way of looking
     camera.rotation.order = 'YXZ';
     this.#bindPointer();
     this.#bindKeys();
@@ -84,8 +85,8 @@ export class WalkControls {
     const strafe = this.locked;
     if (k.has('KeyA') || (strafe && k.has('ArrowLeft'))) side -= 1;
     if (k.has('KeyD') || (strafe && k.has('ArrowRight'))) side += 1;
-    if (k.has('KeyQ') || (!strafe && k.has('ArrowLeft'))) turn -= 1;
-    if (k.has('KeyE') || (!strafe && k.has('ArrowRight'))) turn += 1;
+    if (!strafe && k.has('ArrowLeft')) turn -= 1;
+    if (!strafe && k.has('ArrowRight')) turn += 1;
     fwd -= this.joy.y; side += this.joy.x;
     const run = k.has('ShiftLeft') || k.has('ShiftRight') ? 1.8 : 1;
     let moved = false;
@@ -140,19 +141,15 @@ export class WalkControls {
     }
   }
 
-  // Chrome returns a promise and may reject unadjustedMovement (raw, unaccelerated mouse
-  // input), so ask again without it. Safari and Firefox return nothing and answer with
-  // pointerlockchange / pointerlockerror instead.
+  // Chrome returns a promise; Safari and Firefox return nothing and answer with
+  // pointerlockchange / pointerlockerror instead. No unadjustedMovement: raw input
+  // skips the system's pointer acceleration, which makes trackpads crawl.
   #requestLock() {
-    const ask = (opts) => { try { return this.dom.requestPointerLock(opts); } catch (err) { return Promise.reject(err); } };
     this.#lockPending = true;
-    const req = ask({ unadjustedMovement: true });
+    let req;
+    try { req = this.dom.requestPointerLock(); } catch { req = Promise.reject(); }
     this.#lockByPromise = typeof req?.then === 'function';
-    if (!this.#lockByPromise) return;
-    req.catch((err) => {
-      if (err?.name !== 'NotSupportedError') return this.#lockRefused();
-      Promise.resolve(ask()).catch(() => this.#lockRefused());
-    });
+    if (this.#lockByPromise) req.catch(() => this.#lockRefused());
   }
 
   // The press that asked for the lock falls back to drag to look; a click acts where it landed.
@@ -191,7 +188,7 @@ export class WalkControls {
     el.addEventListener('pointermove', (e) => {
       if (!drag || e.pointerId !== drag.id) return;
       // Like moving a camera: drag right to turn right, down to look down.
-      const degPerPx = this.camera.fov / el.clientHeight;
+      const degPerPx = ((1.3 * this.camera.fov) / el.clientHeight) * this.lookScale;
       this.#look((e.clientX - drag.x) * degPerPx, (e.clientY - drag.y) * degPerPx);
       drag.x = e.clientX; drag.y = e.clientY;
     });
@@ -207,13 +204,13 @@ export class WalkControls {
     };
     el.addEventListener('pointerup', end);
     el.addEventListener('pointercancel', end);
-    // Locked, the mouse reports movement (in pixels, or raw counts with unadjustedMovement) and no position.
+    // Locked, the mouse reports movement and no position.
     document.addEventListener('mousemove', (e) => {
       if (!this.enabled || !this.locked) return;
       const dx = e.movementX, dy = e.movementY;
       // Some browsers report one wild jump right after locking.
       if (Math.abs(dx) > 400 || Math.abs(dy) > 400) return;
-      const degPerPx = (this.lookSpeed * this.camera.fov) / 70;
+      const degPerPx = ((this.lookSpeed * this.camera.fov) / 70) * this.lookScale;
       if (dx || dy) this.#look(dx * degPerPx, dy * degPerPx);
     });
     document.addEventListener('pointerlockchange', () => {
@@ -246,7 +243,8 @@ export class WalkControls {
     const typing = () => /INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName || '');
     addEventListener('keydown', (e) => {
       if (!this.enabled || typing() || e.metaKey || e.ctrlKey) return;
-      if (/^(Key[WASDQE]|Arrow\w+|Shift\w+)$/.test(e.code)) { this.keys.add(e.code); this.tween = null; e.preventDefault(); }
+      if (e.code === 'KeyE') { if (!e.repeat) this.onInteract?.(); e.preventDefault(); return; }
+      if (/^(Key[WASD]|Arrow\w+|Shift\w+)$/.test(e.code)) { this.keys.add(e.code); this.tween = null; e.preventDefault(); }
     });
     addEventListener('keyup', (e) => this.keys.delete(e.code));
     addEventListener('blur', () => { this.keys.clear(); this.unlock(); });
@@ -297,7 +295,7 @@ function makeOverlay(parent) {
   cross.setAttribute('aria-hidden', 'true');
   const pill = document.createElement('div');
   pill.className = 'walk-lock-pill';
-  pill.innerHTML = '<kbd>Esc</kbd> to free the cursor';
+  pill.innerHTML = '<kbd>E</kbd> doors &nbsp; <kbd>Esc</kbd> free the cursor';
   parent.append(cross, pill);
   return [cross, pill];
 }

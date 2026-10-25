@@ -206,12 +206,29 @@ function aim(clientX, clientY, cam) {
 }
 const pickables = () => [arch?.walls, arch?.floors, arch?.trim, fixtures?.solid, furniture.visible ? furniture : null, ...doors.map((d) => d.pivot)].filter(Boolean);
 
+// The swinging door a hit belongs to: the leaf itself, or its frame, casing or
+// the wall within 6" of the opening, so a tap doesn't have to land on the slab.
+function doorAt(h) {
+  if (!h) return null;
+  if (h.object.userData.doorId) return h.object.userData.doorId;
+  if (h.face && Math.abs(h.face.normal.y) > 0.5) return null;
+  const p = h.point;
+  for (const o of U.openings) {
+    if (!doors.some((d) => d.id === o.id)) continue;
+    const dx = p.x - o.p[0], dz = p.z - o.p[1];
+    const s = dx * o.u[0] + dz * o.u[1], t = dx * o.n[0] + dz * o.n[1];
+    if (s > o.a - 0.5 && s < o.b + 0.5 && t > -0.4 && t < o.t1 + 0.4 && p.y < o.head + 0.5) return o.id;
+  }
+  return null;
+}
+
 function pickWalk(cx, cy) {
   if (tape.active) return null;
   aim(cx, cy, walkCam);
   const h = ray.intersectObjects(pickables(), true)[0];
   if (!h) return null;
-  if (h.object.userData.doorId) return { type: 'door', id: h.object.userData.doorId };
+  const door = doorAt(h);
+  if (door) return { type: 'door', id: door };
   const p = h.point.clone();
   if (h.face && Math.abs(h.face.normal.y) < 0.5) {
     const back = new THREE.Vector3(walk.x - p.x, 0, walk.z - p.z);
@@ -224,6 +241,7 @@ const walk = new WalkControls(walkCam, canvas, {
   isBlocked,
   pick: pickWalk,
   onTapDoor: (id) => toggleDoor(id),
+  onInteract: () => interact(),
   onUserMove: () => { dismissHint(); invalidate(); },
   // A click while measuring places a point instead of grabbing the mouse.
   canLock: () => !tape.active && !layout.dragging,
@@ -239,6 +257,25 @@ walk.setPose(startPose());
 
 // ---------------------------------------------------------------------------
 // Doors
+// E in Walk: the door at the crosshair (the middle of the view), or else the
+// nearest door ahead within reach.
+function interact() {
+  if (mode !== 'walk') return;
+  const r = canvas.getBoundingClientRect();
+  const hit = pickWalk(r.left + r.width / 2, r.top + r.height / 2);
+  if (hit?.type === 'door' && doorDistance(hit.id) < 9) { toggleDoor(hit.id); return; }
+  const fx = Math.sin(walk.yaw * DEG), fz = -Math.cos(walk.yaw * DEG);
+  let best = null;
+  for (const o of U.openings) {
+    if (!doors.some((d) => d.id === o.id)) continue;
+    const dx = o.x - walk.x, dz = o.z - walk.z, dist = Math.hypot(dx, dz);
+    if (dist > 6 || (dist > 1.5 && (dx * fx + dz * fz) / dist < Math.cos(55 * DEG))) continue;
+    if (!best || dist < best.dist) best = { id: o.id, dist };
+  }
+  if (best) toggleDoor(best.id);
+}
+const doorDistance = (id) => { const o = U.openings.find((x) => x.id === id); return o ? Math.hypot(o.x - walk.x, o.z - walk.z) : Infinity; };
+
 function toggleDoor(id) {
   const d = doors.find((x) => x.id === id);
   if (!d) return;
@@ -505,7 +542,8 @@ const endTap = (e) => {
   if (e.type === 'pointercancel' || moved > 7 || held > 500) return;
   aim(e.clientX, e.clientY, activeCam());
   const h = ray.intersectObjects(pickables(), true)[0];
-  if (h?.object.userData.doorId) { toggleDoor(h.object.userData.doorId); return; }
+  const door = doorAt(h);
+  if (door) { toggleDoor(door); return; }
   const now = performance.now();
   if (h && now - lastTap.t < 400 && Math.hypot(e.clientX - lastTap.x, e.clientY - lastTap.y) < 36) {
     lastTap.t = 0;
@@ -831,6 +869,24 @@ $('#copyView').addEventListener('click', async () => {
 
 // ---------------------------------------------------------------------------
 // Display units
+// Look speed in Walk (Tools), per browser: a multiplier on mouse and touch looking.
+const LOOK_KEY = 'livingspace.lookSpeed.v1';
+const lookInput = $('#lookSpeed'), lookValue = $('#lookSpeedValue');
+function setLookSpeed(v, save = true) {
+  const x = Math.min(3, Math.max(0.25, Number(v) || 1));
+  walk.lookScale = x;
+  lookInput.value = String(x);
+  lookValue.textContent = `${x.toFixed(x < 1 ? 2 : 1)}×`;
+  if (save) { try { localStorage.setItem(LOOK_KEY, String(x)); } catch { /* storage off */ } }
+}
+{
+  let saved = null;
+  try { saved = localStorage.getItem(LOOK_KEY); } catch { /* storage off */ }
+  setLookSpeed(saved ?? 1, false);
+}
+lookInput.addEventListener('input', () => setLookSpeed(lookInput.value));
+$('#lookSpeedReset').addEventListener('click', () => setLookSpeed(1));
+
 const unitsControl = $('#unitsControl');
 function renderUnitsControl() {
   unitsControl.querySelectorAll('[data-units]').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.units === units.getUnits())));
@@ -934,7 +990,7 @@ const activeCam = () => (mode === 'walk' ? walkCam : mode === 'plan' ? planCam :
 const HINTS = {
   dollhouse: coarse ? 'Drag to orbit · Pinch to zoom · Double-tap a room to walk in' : 'Drag to orbit · Right-drag to pan · Scroll to zoom · Double-click a room to walk in',
   plan: coarse ? 'Drag to pan · Pinch to zoom · Double-tap to walk in' : 'Drag to pan · Scroll to zoom · Double-click to walk in',
-  walk: coarse ? 'Drag to look · Use the pad to move · Tap the floor to walk there' : 'Click to look around · WASD or arrows to move · Click a door to swing it',
+  walk: coarse ? 'Drag to look · Use the pad to move · Tap the floor to walk there · Tap a door to open or shut it' : 'Click to look around · WASD or arrows to move · E opens and shuts doors',
 };
 const hint = $('#hint');
 let hintTimer = 0;

@@ -152,6 +152,13 @@ h1 a:hover { color: var(--oak); }
 .notes { margin: 0; padding: 0 0 0 18px; font-size: 13px; color: var(--ink-2); display: grid; gap: 8px; max-width: 46ch; }
 .notes b { color: var(--ink); font-weight: 600; }
 
+/* Look speed: a slider with its value */
+.range-field { display: flex; justify-content: space-between; align-items: baseline; font-size: 14px; margin: 2px 0 6px; }
+.range-field output { font: 500 12.5px/1 var(--font-mono); color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.range-row { display: flex; align-items: center; gap: 12px; }
+.range-row input[type="range"] { flex: 1; min-width: 0; accent-color: var(--ink); height: 28px; }
+.range-row .btn { padding: 7px 12px; flex: none; }
+
 /* Units: a segmented control */
 .segmented { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); padding: 3px; gap: 2px; border-radius: 10px; background: var(--surface-2); border: 1px solid var(--rule); }
 .segmented button {
@@ -713,12 +720,21 @@ h1 a:hover { color: var(--oak); }
             <label class="toggle" id="overlayToggle" hidden><span>Floor plan overlay<span class="why">Plan view, to check the tracing</span></span><input type="checkbox" id="optOverlay"></label>
           </div>
           <div class="group">
+            <h2>Walk</h2>
+            <label class="range-field" for="lookSpeed"><span>Look speed</span><output id="lookSpeedValue">1.0×</output></label>
+            <div class="range-row">
+              <input type="range" id="lookSpeed" min="0.25" max="3" step="0.05" value="1" aria-describedby="lookSpeedNote">
+              <button class="btn" id="lookSpeedReset">Reset</button>
+            </div>
+            <p class="section-note" id="lookSpeedNote" style="margin:10px 0 0">How fast the view turns when you move the mouse or drag in Walk.</p>
+          </div>
+          <div class="group">
             <h2>Doors</h2>
             <div class="btn-row">
               <button class="btn" id="openDoors">Open all</button>
               <button class="btn" id="closeDoors">Close all</button>
             </div>
-            <p class="section-note" style="margin:10px 0 0">You can also tap any door to swing it.</p>
+            <p class="section-note" style="margin:10px 0 0">Tap or click any door to open or shut it. In Walk, E works the door you're facing.</p>
           </div>
           <div class="group" id="measuredGroup" hidden>
             <h2>How it was measured</h2>
