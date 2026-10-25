@@ -1,0 +1,394 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>3D Living Space</title>
+<meta name="description" content="A to-scale 3D model of a two-bedroom, two-bath apartment, built from the leasing floor plan and walkthrough photos. Orbit the dollhouse, read the plan, or walk through it.">
+<meta name="theme-color" content="#ebe8e3" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1b1a18" media="(prefers-color-scheme: dark)">
+<meta property="og:title" content="3D Living Space">
+<meta property="og:description" content="Walk through a to-scale 3D model of a 2 bed / 2 bath apartment.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%231c1b19'/%3E%3Cpath d='M7 9h18v14H7zM7 16h9v7M16 9v7' fill='none' stroke='%23d4a873' stroke-width='2'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..800&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: plan-room sidebar beside a full-bleed 3D stage; on phones the
+   sidebar becomes a bottom sheet over the stage. Palette taken from the unit's
+   finishes: white walls, greige plank floor, light oak, matte-black hardware. */
+:root {
+  --bg: #ebe8e3;
+  --surface: #f8f7f4;
+  --surface-2: #efece7;
+  --ink: #1c1b19;
+  --ink-2: #625e57;
+  --rule: #dad5cd;
+  --oak: #a87a43;
+  --chip: #1c1b19;
+  --on-chip: #f8f7f4;
+  --shadow: 0 10px 30px rgba(40, 32, 24, 0.14);
+  --font-ui: "Archivo", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --sheet-peek: 112px;
+  --safe-b: env(safe-area-inset-bottom, 0px);
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #1b1a18; --surface: #232220; --surface-2: #2d2b28; --ink: #efece6; --ink-2: #aaa59c;
+    --rule: #3b3935; --oak: #d4a873; --chip: #efece6; --on-chip: #1c1b19;
+    --shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #1b1a18; --surface: #232220; --surface-2: #2d2b28; --ink: #efece6; --ink-2: #aaa59c;
+  --rule: #3b3935; --oak: #d4a873; --chip: #efece6; --on-chip: #1c1b19;
+  --shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  background: var(--bg); color: var(--ink);
+  font: 400 15px/1.45 var(--font-ui);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+[hidden] { display: none !important; }
+button { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--oak); outline-offset: 2px; }
+
+.app { display: grid; grid-template-columns: 352px 1fr; height: 100%; height: 100dvh; }
+
+/* ---------- Sidebar / sheet ---------- */
+.panel {
+  background: var(--surface);
+  border-right: 1px solid var(--rule);
+  display: flex; flex-direction: column;
+  min-height: 0; z-index: 5;
+}
+.title-block { padding: 24px 24px 18px; border-bottom: 1px solid var(--rule); }
+.eyebrow {
+  font: 500 11px/1 var(--font-mono); letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--ink-2); display: flex; gap: 10px; flex-wrap: wrap;
+}
+.eyebrow span + span::before { content: "·"; margin-right: 10px; color: var(--rule); }
+h1 {
+  margin: 12px 0 8px; font-weight: 750; font-stretch: 125%; font-size: 26px; line-height: 1.05;
+  letter-spacing: -0.01em; text-transform: uppercase; text-wrap: balance;
+}
+.lede { margin: 0; color: var(--ink-2); font-size: 14px; max-width: 34ch; }
+
+.sheet-handle { display: none; }
+
+.tabs { display: flex; gap: 4px; padding: 12px 16px 0; border-bottom: 1px solid var(--rule); }
+.tab {
+  appearance: none; background: none; border: 0; cursor: pointer;
+  padding: 10px 12px 12px; font-weight: 600; font-size: 13px; letter-spacing: 0.02em;
+  color: var(--ink-2); border-bottom: 2px solid transparent; margin-bottom: -1px;
+}
+.tab[aria-selected="true"] { color: var(--ink); border-color: var(--ink); }
+.tab-body { overflow-y: auto; flex: 1; min-height: 0; padding: 8px 0 24px; -webkit-overflow-scrolling: touch; }
+
+.section-note { margin: 8px 24px 14px; font-size: 13px; color: var(--ink-2); max-width: 40ch; }
+
+.rooms { list-style: none; margin: 0; padding: 0; }
+.room-btn {
+  appearance: none; background: none; border: 0; width: 100%; text-align: left; cursor: pointer;
+  display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; align-items: baseline;
+  padding: 12px 24px; border-bottom: 1px solid var(--rule);
+}
+.room-btn:hover { background: var(--surface-2); }
+.room-btn[aria-current="true"] { background: var(--surface-2); box-shadow: inset 3px 0 0 var(--oak); }
+.room-name { font-weight: 600; font-size: 15px; }
+.room-dims, .room-area { font: 400 12.5px/1.3 var(--font-mono); color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.room-area { text-align: right; }
+.room-dims { grid-column: 1; }
+.room-btn .src { grid-column: 2; grid-row: 2; font: 500 10px/1 var(--font-mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--oak); text-align: right; }
+
+.photos { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 4px 24px 8px; }
+.photo-btn {
+  appearance: none; border: 0; padding: 0; background: none; cursor: pointer; text-align: left;
+  display: flex; flex-direction: column; gap: 6px; min-width: 0;
+}
+.photo-btn img {
+  width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 4px; display: block;
+  background: var(--surface-2); border: 1px solid var(--rule);
+}
+.photo-btn[aria-current="true"] img { outline: 2px solid var(--oak); outline-offset: 2px; }
+.photo-btn b { font-size: 13px; font-weight: 600; }
+.photo-btn small { font-size: 12px; color: var(--ink-2); line-height: 1.3; }
+
+.group { padding: 6px 24px 16px; border-bottom: 1px solid var(--rule); }
+.group h2 {
+  font: 500 11px/1 var(--font-mono); letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--ink-2); margin: 14px 0 10px;
+}
+.toggle { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0; cursor: pointer; font-size: 14px; }
+.toggle input { appearance: none; width: 38px; height: 22px; border-radius: 11px; background: var(--rule); position: relative; cursor: pointer; flex: none; transition: background .2s; margin: 0; }
+.toggle input::after { content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: var(--surface); transition: transform .2s; box-shadow: 0 1px 2px rgba(0,0,0,.25); }
+.toggle input:checked { background: var(--chip); }
+.toggle input:checked::after { transform: translateX(16px); }
+.toggle input:disabled { opacity: .4; }
+.toggle .why { display: block; font-size: 12px; color: var(--ink-2); }
+.btn-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.btn {
+  appearance: none; cursor: pointer; border: 1px solid var(--rule); background: var(--surface);
+  border-radius: 999px; padding: 9px 16px; font-weight: 600; font-size: 13px;
+}
+.btn:hover { background: var(--surface-2); }
+.btn[aria-pressed="true"], .btn.primary { background: var(--chip); color: var(--on-chip); border-color: var(--chip); }
+.notes { margin: 0; padding: 0 0 0 18px; font-size: 13px; color: var(--ink-2); display: grid; gap: 8px; max-width: 46ch; }
+.notes b { color: var(--ink); font-weight: 600; }
+
+/* ---------- Stage ---------- */
+.stage { position: relative; min-width: 0; min-height: 0; overflow: hidden; background: var(--bg); }
+#scene { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; outline: none; }
+.stage.measuring #scene { cursor: crosshair; }
+
+.modes {
+  position: absolute; top: max(16px, env(safe-area-inset-top, 0px)); left: 50%; transform: translateX(-50%);
+  display: flex; padding: 4px; gap: 2px; border-radius: 999px; z-index: 3;
+  background: color-mix(in srgb, var(--surface) 92%, transparent); box-shadow: var(--shadow);
+  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+}
+.mode {
+  appearance: none; border: 0; background: none; cursor: pointer; border-radius: 999px;
+  padding: 9px 18px; font-weight: 600; font-size: 13.5px; letter-spacing: 0.01em; color: var(--ink-2);
+  display: flex; align-items: center; gap: 7px;
+}
+.mode svg { width: 16px; height: 16px; flex: none; }
+.mode[aria-pressed="true"] { background: var(--chip); color: var(--on-chip); }
+
+.labels { position: absolute; inset: 0; pointer-events: none; z-index: 1; }
+.room-label {
+  position: absolute; left: 0; top: 0; white-space: nowrap; text-align: center;
+  font-size: 12px; line-height: 1.25; color: var(--ink);
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  padding: 4px 8px 5px; border-radius: 5px; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+  will-change: transform;
+}
+.room-label b { display: block; font-weight: 700; font-size: 10.5px; letter-spacing: 0.07em; text-transform: uppercase; }
+.room-label span { font: 400 11px/1.2 var(--font-mono); color: var(--ink-2); }
+.room-label.zone { background: none; box-shadow: none; padding: 0; }
+.room-label.zone b { font-weight: 700; color: #4a463f; text-shadow: 0 0 4px #f4f1ec, 0 0 8px #f4f1ec; }
+.room-label.minor { padding: 2px 6px 3px; }
+.labels.compact .room-label span { display: none; }
+.labels.compact .room-label { padding: 2px 6px 3px; }
+.labels.compact .room-label b { font-size: 9.5px; }
+.room-label.minor b { font-size: 9.5px; }
+.measure-label {
+  position: absolute; left: 0; top: 0; pointer-events: none;
+  font: 500 12.5px/1 var(--font-mono); background: var(--chip); color: var(--on-chip);
+  padding: 5px 8px; border-radius: 4px; white-space: nowrap; font-variant-numeric: tabular-nums;
+}
+
+.photo-overlay { position: absolute; pointer-events: none; z-index: 1; opacity: .5; transition: opacity .15s; object-fit: fill; }
+.photo-bar {
+  position: absolute; left: 50%; transform: translateX(-50%); bottom: max(16px, calc(var(--safe-b) + 12px));
+  z-index: 4; width: min(560px, calc(100% - 32px));
+  display: grid; grid-template-columns: 1fr auto; gap: 8px 12px; align-items: center;
+  background: var(--surface); border-radius: 12px; padding: 12px 14px; box-shadow: var(--shadow);
+}
+.photo-bar .meta { min-width: 0; }
+.photo-bar .meta b { display: block; font-size: 14px; }
+.photo-bar .meta small { display: block; color: var(--ink-2); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fade { grid-column: 1 / -1; display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: center; font: 500 11px/1 var(--font-mono); letter-spacing: .06em; text-transform: uppercase; color: var(--ink-2); }
+.fade input { width: 100%; accent-color: var(--oak); }
+
+.hint {
+  position: absolute; left: 50%; transform: translateX(-50%); bottom: 18px; z-index: 2;
+  background: color-mix(in srgb, var(--surface) 90%, transparent); color: var(--ink-2);
+  padding: 8px 14px; border-radius: 999px; font-size: 12.5px; box-shadow: var(--shadow);
+  max-width: calc(100% - 32px); text-align: center; transition: opacity .4s; pointer-events: none;
+}
+.hint.gone { opacity: 0; }
+
+.minimap {
+  position: absolute; right: 16px; bottom: 16px; z-index: 2; width: 230px; height: 158px;
+  background: var(--surface); border-radius: 10px; box-shadow: var(--shadow); cursor: pointer; touch-action: none;
+}
+.joystick {
+  position: absolute; left: max(20px, env(safe-area-inset-left, 0px)); bottom: 28px; z-index: 3;
+  width: 112px; height: 112px; border-radius: 50%; touch-action: none;
+  background: color-mix(in srgb, var(--surface) 70%, transparent); box-shadow: var(--shadow);
+  border: 1px solid var(--rule); display: grid; place-items: center;
+}
+.joystick .knob { width: 46px; height: 46px; border-radius: 50%; background: var(--chip); opacity: .85; pointer-events: none; }
+.scalebar {
+  position: absolute; left: 20px; bottom: 20px; z-index: 2; display: flex; flex-direction: column; gap: 4px;
+  font: 500 11px/1 var(--font-mono); color: var(--ink-2);
+}
+.scalebar span { display: block; height: 6px; border: 1.5px solid var(--ink); border-top: 0; }
+
+.icon-btn {
+  position: absolute; z-index: 3; width: 40px; height: 40px; border-radius: 50%; border: 0; cursor: pointer;
+  background: var(--surface); box-shadow: var(--shadow); display: grid; place-items: center;
+}
+.recenter { right: 16px; top: max(16px, env(safe-area-inset-top, 0px)); }
+.icon-btn svg { width: 18px; height: 18px; }
+
+.loading {
+  position: absolute; inset: 0; z-index: 6; display: grid; place-items: center; background: var(--bg);
+  font: 500 12px/1 var(--font-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--ink-2);
+  transition: opacity .5s;
+}
+.loading.done { opacity: 0; pointer-events: none; }
+.error { max-width: 36ch; text-align: center; text-transform: none; letter-spacing: 0; font: 400 14px/1.5 var(--font-ui); color: var(--ink); padding: 24px; }
+
+/* ---------- Phones and narrow tablets: bottom sheet ---------- */
+@media (max-width: 899px) {
+  .app { grid-template-columns: 1fr; }
+  .stage { position: fixed; inset: 0; }
+  .panel {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 5;
+    height: min(72dvh, 620px);
+    border-right: 0; border-radius: 16px 16px 0 0; box-shadow: 0 -8px 30px rgba(30, 24, 18, 0.18);
+    transform: translateY(calc(100% - var(--sheet-peek) - var(--safe-b)));
+    transition: transform .32s cubic-bezier(.2,.8,.2,1);
+    padding-bottom: var(--safe-b);
+    padding-left: env(safe-area-inset-left, 0px); padding-right: env(safe-area-inset-right, 0px);
+  }
+  .panel.open { transform: translateY(0); }
+  .panel.hidden-sheet { transform: translateY(100%); }
+  .sheet-handle {
+    display: block; appearance: none; border: 0; background: none; cursor: pointer; order: -2;
+    width: 100%; height: 22px; padding: 0; position: relative; touch-action: none; flex: none;
+  }
+  .sheet-handle::after { content: ""; position: absolute; left: 50%; top: 9px; width: 40px; height: 4px; margin-left: -20px; border-radius: 2px; background: var(--rule); }
+  .title-block { order: -1; padding: 0 20px 10px; border-bottom: 0; display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+  .title-block h1 { font-size: 17px; margin: 0; order: -1; white-space: nowrap; }
+  .title-block .lede { display: none; }
+  .title-block .eyebrow { font-size: 9.5px; gap: 6px; flex-wrap: nowrap; white-space: nowrap; }
+  .eyebrow span + span::before { margin-right: 6px; }
+  .panel.open .title-block .lede { display: block; }
+  .panel.open .title-block { flex-wrap: wrap; }
+  .tabs { padding: 0 8px; }
+  .tab { flex: 1; padding: 10px 6px 12px; }
+  .room-btn, .group { padding-left: 20px; padding-right: 20px; }
+  .photos { padding: 4px 20px 8px; }
+  .section-note { margin-left: 20px; margin-right: 20px; }
+
+  .modes { top: max(12px, env(safe-area-inset-top, 0px)); width: calc(100% - 24px - 52px); left: 12px; transform: none; justify-content: space-between; }
+  .mode { flex: 1; justify-content: center; padding: 9px 8px; font-size: 13px; }
+  .recenter { right: 12px; top: max(12px, env(safe-area-inset-top, 0px)); width: 42px; height: 42px; }
+  .minimap { right: 12px; top: calc(max(12px, env(safe-area-inset-top, 0px)) + 54px); bottom: auto; width: 150px; height: 104px; }
+  .scalebar { bottom: calc(var(--sheet-peek) + var(--safe-b) + 14px); }
+  .hint { bottom: auto; top: calc(max(12px, env(safe-area-inset-top, 0px)) + 56px); max-width: calc(100% - 190px); left: 12px; transform: none; text-align: left; border-radius: 12px; }
+  .joystick { bottom: calc(var(--sheet-peek) + var(--safe-b) + 20px); }
+  .photo-bar { bottom: calc(var(--sheet-peek) + var(--safe-b) + 12px); }
+  .stage.photo-active .photo-bar { bottom: calc(var(--safe-b) + 12px); }
+}
+@media (max-width: 380px) {
+  .mode svg { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; }
+}
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<div class="app">
+  <aside class="panel" id="panel" aria-label="Unit details">
+    <button class="sheet-handle" id="sheetHandle" aria-label="Show details" aria-expanded="false"></button>
+    <header class="title-block">
+      <div class="eyebrow"><span>2 Bed</span><span>2 Bath</span><span>821 sq ft</span></div>
+      <h1>3D Living Space</h1>
+      <p class="lede">A to-scale model of the unit, traced from the leasing floor plan and checked against walkthrough photos.</p>
+    </header>
+    <nav class="tabs" role="tablist">
+      <button class="tab" role="tab" id="t-rooms" aria-controls="tab-rooms" aria-selected="true">Rooms</button>
+      <button class="tab" role="tab" id="t-photos" aria-controls="tab-photos" aria-selected="false">Photos</button>
+      <button class="tab" role="tab" id="t-tools" aria-controls="tab-tools" aria-selected="false">Tools</button>
+    </nav>
+    <div class="tab-body">
+      <section id="tab-rooms" role="tabpanel" aria-labelledby="t-rooms">
+        <ul class="rooms" id="roomList"></ul>
+        <p class="section-note">Sizes marked <b>Plan</b> are printed on the leasing plan. The rest are measured from the traced walls, interior face to face.</p>
+      </section>
+      <section id="tab-photos" role="tabpanel" aria-labelledby="t-photos" hidden>
+        <p class="section-note">Each photo opens the model from the spot it was taken. Slide between the photo and the model to compare.</p>
+        <div class="photos" id="photoList"></div>
+      </section>
+      <section id="tab-tools" role="tabpanel" aria-labelledby="t-tools" hidden>
+        <div class="group">
+          <h2>Measure</h2>
+          <div class="btn-row">
+            <button class="btn" id="measureBtn" aria-pressed="false">Measure a distance</button>
+            <button class="btn" id="clearMeasure">Clear</button>
+          </div>
+          <p class="section-note" style="margin:10px 0 0">Tap two points on the floor in Dollhouse or Plan view. Points snap to nearby walls.</p>
+        </div>
+        <div class="group">
+          <h2>Display</h2>
+          <label class="toggle"><span>Sample furniture<span class="why">Staging drawn on the leasing plan</span></span><input type="checkbox" id="optFurniture" checked></label>
+          <label class="toggle"><span>Room labels</span><input type="checkbox" id="optLabels" checked></label>
+          <label class="toggle"><span>Cut walls at 4½'<span class="why">Dollhouse view</span></span><input type="checkbox" id="optCutaway"></label>
+          <label class="toggle"><span>Leasing plan overlay<span class="why">Plan view, to check the tracing</span></span><input type="checkbox" id="optOverlay"></label>
+        </div>
+        <div class="group">
+          <h2>Doors</h2>
+          <div class="btn-row">
+            <button class="btn" id="openDoors">Open all</button>
+            <button class="btn" id="closeDoors">Close all</button>
+          </div>
+          <p class="section-note" style="margin:10px 0 0">You can also tap any door to swing it.</p>
+        </div>
+        <div class="group">
+          <h2>How it was measured</h2>
+          <ul class="notes">
+            <li><b>Walls and openings</b> are traced from the leasing plan at 25.86 px per foot, which reproduces all three printed room sizes within 2".</li>
+            <li><b>Ceiling height 9'0"</b> comes from solving where each photo was taken, using wall corners and floor and ceiling lines that the plan locates.</li>
+            <li><b>Living room window</b> is a 6'11" opening centered on the wall, measured from the photo. The plan symbol draws it about 9'. Sills sit about 23" up and heads line up with the 8' doors.</li>
+            <li><b>Kitchen</b> follows the photo: fridge, base cabinet, and range along the back wall; sink and dishwasher on the side wall facing the dining area.</li>
+            <li><b>Primary bath</b> follows the photos (walk-in shower with a glass panel, vanity and toilet side by side). The plan shows a corner shower.</li>
+            <li><b>Bath 2 and Bedroom 2</b> weren't photographed, so they follow the plan with matching finishes.</li>
+          </ul>
+        </div>
+      </section>
+    </div>
+  </aside>
+
+  <main class="stage" id="stage">
+    <canvas id="scene" tabindex="0" aria-label="3D view of the apartment"></canvas>
+    <div class="labels" id="labels"></div>
+    <img class="photo-overlay" id="photoOverlay" alt="" hidden>
+
+    <div class="modes" role="group" aria-label="View">
+      <button class="mode" data-mode="dollhouse" aria-pressed="true">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 6l6-3.5L14 6v6L8 15.5 2 12z"/><path d="M2 6l6 3.5L14 6M8 9.5v6"/></svg>Dollhouse</button>
+      <button class="mode" data-mode="plan" aria-pressed="false">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="2" width="12" height="12"/><path d="M2 8h6V2M8 11v3"/></svg>Plan</button>
+      <button class="mode" data-mode="walk" aria-pressed="false">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="3" r="1.6"/><path d="M8 5.5v4l-2.5 5M8 9.5l2.5 5M5 8l3-2.5L11 8"/></svg>Walk</button>
+    </div>
+    <button class="icon-btn recenter" id="recenter" aria-label="Reset view">
+      <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 9a6 6 0 1 0 2-4.5"/><path d="M3 2.5V6h3.5"/></svg>
+    </button>
+
+    <div class="photo-bar" id="photoBar" hidden>
+      <div class="meta"><b id="photoTitle"></b><small id="photoCaption"></small></div>
+      <button class="btn primary" id="photoDone">Done</button>
+      <label class="fade"><span>Model</span><input type="range" id="photoFade" min="0" max="100" value="50" aria-label="Blend between model and photo"><span>Photo</span></label>
+    </div>
+
+    <div class="hint" id="hint"></div>
+    <canvas class="minimap" id="minimap" hidden aria-label="Mini map. Tap to move there."></canvas>
+    <div class="joystick" id="joystick" hidden aria-hidden="true"><div class="knob"></div></div>
+    <div class="scalebar" id="scalebar" hidden><span></span><b></b></div>
+    <div class="loading" id="loading">Building the unit…</div>
+  </main>
+</div>
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>
