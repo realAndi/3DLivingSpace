@@ -1,0 +1,33 @@
+name: CI
+
+# Tests, then the image the droplet will build. The droplet deploys by pulling
+# main on a timer (see "3D Living Space at /3DLivingSpace/" in Portfolio-Site's
+# deploy/README.md), so nothing here holds a key or deploys.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Test and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - name: Image builds and answers
+        run: |
+          docker build -t 3dlivingspace:ci .
+          docker run -d --name app -p 8790:8790 -e BASE_PATH=/3DLivingSpace 3dlivingspace:ci
+          for i in $(seq 1 30); do curl -sf http://localhost:8790/3DLivingSpace/healthz && break; sleep 1; done
+          curl -sf -o /dev/null http://localhost:8790/3DLivingSpace/api/card.png
+          docker logs app

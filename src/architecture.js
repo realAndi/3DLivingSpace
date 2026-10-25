@@ -1,6 +1,9 @@
 import * as THREE from 'three';
 import { Batch, Frame, DIRS, pointInPoly } from './kit.js';
-import { WALLS, wallById, OPENINGS, ROOMS, HEIGHT, X, Z, UNIT } from './plan.js';
+import { WALLS, ROOMS, HEIGHT, X, Z, UNIT } from './plan.js';
+import { openings } from './space.js';
+
+export { openings };
 
 const DOOR_T = 0.146;     // 1¾" door leaf
 const CASING_W = 0.29;    // 3½" flat casing
@@ -8,18 +11,6 @@ const CASING_T = 0.05;
 const BASE_H = 0.42;      // 5" baseboard
 const BASE_T = 0.05;
 
-// Openings resolved to feet along their wall.
-export const openings = OPENINGS.map((o) => {
-  const w = wallById[o.wall];
-  const conv = w.axis === 'x' ? X : Z;
-  const isWindow = o.type === 'window';
-  return {
-    ...o, w,
-    a: conv(o.from), b: conv(o.to),
-    sill: isWindow ? HEIGHT.windowSill : 0,
-    head: isWindow ? HEIGHT.windowHead : HEIGHT.doorHead,
-  };
-});
 
 const span = (w) => (w.axis === 'x' ? [w.x0, w.x1] : [w.z0, w.z1]);
 const thickness = (w) => (w.axis === 'x' ? w.z1 - w.z0 : w.x1 - w.x0);

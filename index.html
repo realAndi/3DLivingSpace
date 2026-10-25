@@ -3,12 +3,15 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>3D Living Space</title>
-<meta name="description" content="A to-scale 3D model of a two-bedroom, two-bath apartment, built from the leasing floor plan and walkthrough photos. Orbit the dollhouse, read the plan, or walk through it.">
+<!--base-->
 <meta name="theme-color" content="#ebe8e3" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#1b1a18" media="(prefers-color-scheme: dark)">
+<!--meta-->
+<title>3D Living Space</title>
+<meta name="description" content="Furnish a to-scale 3D model of a 2 bed, 2 bath apartment, then share your version.">
 <meta property="og:title" content="3D Living Space">
-<meta property="og:description" content="Walk through a to-scale 3D model of a 2 bed / 2 bath apartment.">
+<meta property="og:description" content="Furnish a to-scale 3D model of a 2 bed, 2 bath apartment, then share your version.">
+<!--/meta-->
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%231c1b19'/%3E%3Cpath d='M7 9h18v14H7zM7 16h9v7M16 9v7' fill='none' stroke='%23d4a873' stroke-width='2'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -82,6 +85,8 @@ h1 {
   letter-spacing: -0.01em; text-transform: uppercase; text-wrap: balance;
 }
 .lede { margin: 0; color: var(--ink-2); font-size: 14px; max-width: 34ch; }
+.design-line { margin: 0 0 8px; font-weight: 600; font-size: 14px; color: var(--oak); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.design-line:empty { display: none; }
 
 .sheet-handle { display: none; }
 
@@ -110,18 +115,6 @@ h1 {
 .room-dims { grid-column: 1; }
 .room-btn .src { grid-column: 2; grid-row: 2; font: 500 10px/1 var(--font-mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--oak); text-align: right; }
 
-.photos { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 4px 24px 8px; }
-.photo-btn {
-  appearance: none; border: 0; padding: 0; background: none; cursor: pointer; text-align: left;
-  display: flex; flex-direction: column; gap: 6px; min-width: 0;
-}
-.photo-btn img {
-  width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 4px; display: block;
-  background: var(--surface-2); border: 1px solid var(--rule);
-}
-.photo-btn[aria-current="true"] img { outline: 2px solid var(--oak); outline-offset: 2px; }
-.photo-btn b { font-size: 13px; font-weight: 600; }
-.photo-btn small { font-size: 12px; color: var(--ink-2); line-height: 1.3; }
 
 .group { padding: 6px 24px 16px; border-bottom: 1px solid var(--rule); }
 .group h2 {
@@ -182,23 +175,13 @@ h1 {
 .labels.compact .room-label b { font-size: 9.5px; }
 .room-label.minor b { font-size: 9.5px; }
 .measure-label {
-  position: absolute; left: 0; top: 0; pointer-events: none;
-  font: 500 12.5px/1 var(--font-mono); background: var(--chip); color: var(--on-chip);
+  position: absolute; left: 0; top: 0; pointer-events: none; text-align: center;
+  font: 500 12.5px/1.2 var(--font-mono); background: var(--chip); color: var(--on-chip);
   padding: 5px 8px; border-radius: 4px; white-space: nowrap; font-variant-numeric: tabular-nums;
 }
+.measure-label small { display: block; font-size: 10.5px; opacity: 0.75; }
+.measure-label.preview { opacity: 0.8; }
 
-.photo-overlay { position: absolute; pointer-events: none; z-index: 1; opacity: .5; transition: opacity .15s; object-fit: fill; }
-.photo-bar {
-  position: absolute; left: 50%; transform: translateX(-50%); bottom: max(16px, calc(var(--safe-b) + 12px));
-  z-index: 4; width: min(560px, calc(100% - 32px));
-  display: grid; grid-template-columns: 1fr auto; gap: 8px 12px; align-items: center;
-  background: var(--surface); border-radius: 12px; padding: 12px 14px; box-shadow: var(--shadow);
-}
-.photo-bar .meta { min-width: 0; }
-.photo-bar .meta b { display: block; font-size: 14px; }
-.photo-bar .meta small { display: block; color: var(--ink-2); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.fade { grid-column: 1 / -1; display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: center; font: 500 11px/1 var(--font-mono); letter-spacing: .06em; text-transform: uppercase; color: var(--ink-2); }
-.fade input { width: 100%; accent-color: var(--oak); }
 
 .hint {
   position: absolute; left: 50%; transform: translateX(-50%); bottom: 18px; z-index: 2;
@@ -230,6 +213,18 @@ h1 {
   background: var(--surface); box-shadow: var(--shadow); display: grid; place-items: center;
 }
 .recenter { right: 16px; top: max(16px, env(safe-area-inset-top, 0px)); }
+.tape-btn { right: 16px; top: calc(max(16px, env(safe-area-inset-top, 0px)) + 48px); }
+.tape-btn[aria-pressed="true"] { background: var(--chip); color: var(--on-chip); }
+.tape-bar, .view-chip {
+  position: absolute; left: 50%; transform: translateX(-50%); z-index: 4;
+  display: flex; align-items: center; gap: 8px; max-width: calc(100% - 24px);
+  background: var(--surface); border-radius: 12px; padding: 7px 7px 7px 14px; box-shadow: var(--shadow);
+}
+.tape-bar { bottom: 18px; }
+.tape-bar span, .view-chip span { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.tape-bar .btn, .view-chip .btn { padding: 7px 12px; flex: none; }
+.view-chip { top: calc(max(16px, env(safe-area-inset-top, 0px)) + 56px); }
+.stage.measuring .piece-bar, .stage.measuring .hint { display: none; }
 .icon-btn svg { width: 18px; height: 18px; }
 
 .loading {
@@ -239,6 +234,23 @@ h1 {
 }
 .loading.done { opacity: 0; pointer-events: none; }
 .error { max-width: 36ch; text-align: center; text-transform: none; letter-spacing: 0; font: 400 14px/1.5 var(--font-ui); color: var(--ink); padding: 24px; }
+
+/* ---------- Designs and sharing ---------- */
+.notice { background: var(--surface-2); border-bottom: 0; padding-top: 14px; }
+.notice p { margin: 0 0 12px; font-size: 14px; }
+.status { margin: 8px 0 0; font-size: 12.5px; color: var(--ink-2); }
+.status[data-state="error"] { color: #b4442c; }
+.field.wide + .field.wide { margin-top: 10px; }
+.card-preview { width: 100%; height: auto; aspect-ratio: 1200 / 630; border-radius: 6px; border: 1px solid var(--rule); background: var(--surface-2); display: block; margin: 0 0 10px; }
+.link-row { display: flex; gap: 8px; margin: 0 0 10px; }
+.link-row input {
+  flex: 1; min-width: 0; font: 400 12.5px/1 var(--font-mono); color: var(--ink); background: var(--surface-2);
+  border: 1px solid var(--rule); border-radius: 6px; padding: 9px;
+}
+.steps { margin: 0; padding-left: 20px; display: grid; gap: 12px; font-size: 13.5px; }
+.steps .link-row { margin: 8px 0 0; }
+.steps .btn { margin-top: 8px; }
+#editGroup .btn { margin-bottom: 8px; }
 
 /* ---------- Furniture ---------- */
 .tab .count { font: 500 10.5px/1 var(--font-mono); color: var(--oak); margin-left: 2px; }
@@ -278,6 +290,7 @@ h1 {
 .piece-row small { font: 400 11.5px/1 var(--font-mono); color: var(--ink-2); white-space: nowrap; }
 .piece-row[aria-current="true"] { box-shadow: inset 3px 0 0 var(--oak); }
 
+.piece-bar.read-only .pb-actions button:not([data-act="done"]) { display: none; }
 .piece-bar {
   position: absolute; left: 50%; transform: translateX(-50%); bottom: 18px; z-index: 4;
   display: flex; align-items: center; gap: 12px; max-width: calc(100% - 24px);
@@ -346,18 +359,20 @@ h1 {
   .tabs { padding: 0 8px; }
   .tab { flex: 1; padding: 10px 6px 12px; }
   .room-btn, .group { padding-left: 20px; padding-right: 20px; }
-  .photos { padding: 4px 20px 8px; }
   .section-note { margin-left: 20px; margin-right: 20px; }
 
   .modes { top: max(12px, env(safe-area-inset-top, 0px)); width: calc(100% - 24px - 52px); left: 12px; transform: none; justify-content: space-between; }
   .mode { flex: 1; justify-content: center; padding: 9px 8px; font-size: 13px; }
   .recenter { right: 12px; top: max(12px, env(safe-area-inset-top, 0px)); width: 42px; height: 42px; }
-  .minimap { right: 12px; top: calc(max(12px, env(safe-area-inset-top, 0px)) + 54px); bottom: auto; width: 150px; height: 104px; }
+  .tape-btn { right: 12px; top: calc(max(12px, env(safe-area-inset-top, 0px)) + 52px); width: 42px; height: 42px; }
+  .tape-bar { bottom: calc(var(--sheet-peek) + var(--safe-b) + 12px); }
+  .view-chip { top: calc(max(12px, env(safe-area-inset-top, 0px)) + 54px); left: 12px; transform: none; max-width: calc(100% - 78px); }
+  .minimap { right: 12px; top: calc(max(12px, env(safe-area-inset-top, 0px)) + 104px); bottom: auto; width: 150px; height: 104px; }
   .scalebar { bottom: calc(var(--sheet-peek) + var(--safe-b) + 14px); }
   .hint { bottom: auto; top: calc(max(12px, env(safe-area-inset-top, 0px)) + 56px); max-width: calc(100% - 190px); left: 12px; transform: none; text-align: left; border-radius: 12px; }
   .joystick { bottom: calc(var(--sheet-peek) + var(--safe-b) + 20px); }
-  .stage.piece-active .joystick { bottom: calc(var(--sheet-peek) + var(--safe-b) + 84px); }
-  .photo-bar { bottom: calc(var(--sheet-peek) + var(--safe-b) + 12px); }
+  .stage.piece-active .joystick, .stage.measuring .joystick { bottom: calc(var(--sheet-peek) + var(--safe-b) + 84px); }
+  .stage.visitor .hint { display: none; }
   .piece-bar { bottom: calc(var(--sheet-peek) + var(--safe-b) + 12px); gap: 8px; padding-left: 12px; width: calc(100% - 24px); justify-content: space-between; }
   .pb-actions button { min-width: 36px; }
   .toast { bottom: calc(var(--sheet-peek) + var(--safe-b) + 76px); }
@@ -365,7 +380,6 @@ h1 {
   .fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .catalog-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .tab { font-size: 12.5px; padding-left: 2px; padding-right: 2px; }
-  .stage.photo-active .photo-bar { bottom: calc(var(--safe-b) + 12px); }
 }
 @media (max-width: 380px) {
   .mode svg { display: none; }
@@ -388,12 +402,13 @@ h1 {
     <header class="title-block">
       <div class="eyebrow"><span>2 Bed</span><span>2 Bath</span><span>821 sq ft</span></div>
       <h1>3D Living Space</h1>
-      <p class="lede">A to-scale model of the unit, traced from the leasing floor plan and checked against walkthrough photos.</p>
+      <p class="design-line" id="designLine"></p>
+      <p class="lede">A to-scale model of a 2 bed, 2 bath apartment. Furnish it, measure it, walk through it, and share your version.</p>
     </header>
     <nav class="tabs" role="tablist">
       <button class="tab" role="tab" id="t-rooms" aria-controls="tab-rooms" aria-selected="true">Rooms</button>
-      <button class="tab" role="tab" id="t-photos" aria-controls="tab-photos" aria-selected="false">Photos</button>
-      <button class="tab" role="tab" id="t-furniture" aria-controls="tab-furniture" aria-selected="false">Furniture <span class="count" id="furnitureCount"></span></button>
+      <button class="tab" role="tab" id="t-furniture" aria-controls="tab-furniture" aria-selected="false">Furnish <span class="count" id="furnitureCount"></span></button>
+      <button class="tab" role="tab" id="t-share" aria-controls="tab-share" aria-selected="false">Share</button>
       <button class="tab" role="tab" id="t-tools" aria-controls="tab-tools" aria-selected="false">Tools</button>
     </nav>
     <div class="tab-body">
@@ -401,11 +416,11 @@ h1 {
         <ul class="rooms" id="roomList"></ul>
         <p class="section-note">Sizes marked <b>Plan</b> are printed on the leasing plan. The rest are measured from the traced walls, interior face to face.</p>
       </section>
-      <section id="tab-photos" role="tabpanel" aria-labelledby="t-photos" hidden>
-        <p class="section-note">Each photo opens the model from the spot it was taken. Slide between the photo and the model to compare.</p>
-        <div class="photos" id="photoList"></div>
-      </section>
       <section id="tab-furniture" role="tabpanel" aria-labelledby="t-furniture" hidden>
+        <div class="group notice" id="viewNotice" hidden>
+          <p id="viewNoticeText"></p>
+          <button class="btn primary" id="forkBtn">Make your own version</button>
+        </div>
         <div class="group" id="pieceEditor" hidden>
           <h2>Selected piece</h2>
           <label class="field wide"><span>Name</span><input id="peName" type="text" maxlength="40" autocomplete="off"></label>
@@ -421,30 +436,67 @@ h1 {
             <button class="btn" id="peDel">Delete</button>
           </div>
         </div>
-        <div class="group">
+        <div class="group" id="addGroup">
           <h2>Add a piece</h2>
           <p class="section-note flush">Tap a piece to drop it into view, then drag it into place. Sizes are typical; change them to match yours.</p>
+          <div class="catalog" id="assetGroup" hidden>
+            <h3>Made for this design</h3>
+            <div class="catalog-grid" id="assetList"></div>
+          </div>
           <div class="catalog" id="catalog"></div>
         </div>
         <div class="group">
           <h2>Your layout</h2>
           <ul class="layout-list" id="layoutList"></ul>
           <p class="section-note flush" id="layoutEmpty">Nothing placed yet.</p>
-          <div class="btn-row">
-            <button class="btn" id="shareLayout">Share layout</button>
+          <div class="btn-row" id="layoutTools">
             <button class="btn" id="clearLayout">Clear all</button>
           </div>
-          <p class="section-note flush">Your layout saves in this browser. A share link opens the same layout on someone else's phone or computer.</p>
+        </div>
+      </section>
+      <section id="tab-share" role="tabpanel" aria-labelledby="t-share" hidden>
+        <div class="group">
+          <h2>This design</h2>
+          <label class="field wide"><span>Name</span><input id="designTitle" type="text" maxlength="60" placeholder="e.g. Warm minimal" autocomplete="off"></label>
+          <label class="field wide"><span>Your name (optional)</span><input id="designAuthor" type="text" maxlength="40" placeholder="Shown as “by …”" autocomplete="off"></label>
+          <p class="status" id="saveStatus" role="status"></p>
+        </div>
+        <div class="group" id="shareGroup" hidden>
+          <h2>Share</h2>
+          <img class="card-preview" id="cardPreview" alt="How the link looks when you share it" width="1200" height="630">
+          <div class="link-row"><input id="viewLink" type="text" readonly aria-label="Link to this design"><button class="btn primary" id="copyView">Share</button></div>
+          <p class="section-note flush">Anyone with this link can look around and make their own version. They can't change yours.</p>
+          <div id="editGroup" hidden>
+            <button class="btn" id="copyEdit">Copy edit link</button>
+            <p class="section-note flush">The edit link changes this design. Use it to keep editing on another device, or hand it to an AI. Keep it private.</p>
+          </div>
+        </div>
+        <div class="group">
+          <h2>Design with AI</h2>
+          <p class="section-note flush">Claude and other AI apps that support MCP can furnish a design for you. They get every room's measurements, place pieces, check walkways and door swings, and can build custom 3D pieces.</p>
+          <ol class="steps">
+            <li>Add this server as a connector. In Claude: Settings, then Connectors, then Add custom connector.
+              <div class="link-row"><input id="mcpUrl" type="text" readonly aria-label="MCP server address"><button class="btn" id="copyMcp">Copy</button></div></li>
+            <li>Paste your edit link into a chat and say what you want, like “Furnish the living room in a warm minimal style and leave 36 inches to walk around.”
+              <div><button class="btn" id="copyPrompt">Copy a starter prompt</button></div></li>
+            <li>Watch it here. Changes show up within a few seconds.</li>
+          </ol>
+        </div>
+        <div class="group">
+          <h2>Your designs</h2>
+          <ul class="layout-list" id="myDesigns"></ul>
+          <p class="section-note flush" id="myDesignsEmpty">Designs you make in this browser show up here.</p>
+          <button class="btn" id="newDesign">Start a new design</button>
         </div>
       </section>
       <section id="tab-tools" role="tabpanel" aria-labelledby="t-tools" hidden>
         <div class="group">
           <h2>Measure</h2>
           <div class="btn-row">
-            <button class="btn" id="measureBtn" aria-pressed="false">Measure a distance</button>
+            <button class="btn" id="measureBtn" aria-pressed="false">Tape measure</button>
             <button class="btn" id="clearMeasure">Clear</button>
           </div>
-          <p class="section-note" style="margin:10px 0 0">Tap two points on the floor in Dollhouse or Plan view. Points snap to nearby walls.</p>
+          <p class="section-note" style="margin:10px 0 0">Works in every view. Tap two points. Plan measures along the floor; Dollhouse and Walk measure between any surfaces, so you can check heights too. Points snap to walls, and to level and plumb lines.</p>
         </div>
         <div class="group">
           <h2>Display</h2>
@@ -479,7 +531,6 @@ h1 {
   <main class="stage" id="stage">
     <canvas id="scene" tabindex="0" aria-label="3D view of the apartment"></canvas>
     <div class="labels" id="labels"></div>
-    <img class="photo-overlay" id="photoOverlay" alt="" hidden>
 
     <div class="modes" role="group" aria-label="View">
       <button class="mode" data-mode="dollhouse" aria-pressed="true">
@@ -489,15 +540,22 @@ h1 {
       <button class="mode" data-mode="walk" aria-pressed="false">
         <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="3" r="1.6"/><path d="M8 5.5v4l-2.5 5M8 9.5l2.5 5M5 8l3-2.5L11 8"/></svg>Walk</button>
     </div>
+    <button class="icon-btn tape-btn" id="tapeBtn" aria-label="Tape measure" aria-pressed="false" title="Tape measure">
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2" y="6.5" width="16" height="7" rx="1.5"/><path d="M5 6.5v2.5M8 6.5v3.5M11 6.5v2.5M14 6.5v3.5"/></svg>
+    </button>
+    <div class="view-chip" id="viewChip" hidden>
+      <span id="viewChipText"></span>
+      <button class="btn primary" id="forkChip">Make your own</button>
+    </div>
+    <div class="tape-bar" id="tapeBar" hidden>
+      <span id="tapeText"></span>
+      <button class="btn" id="tapeClear">Clear</button>
+      <button class="btn primary" id="tapeDone">Done</button>
+    </div>
     <button class="icon-btn recenter" id="recenter" aria-label="Reset view">
       <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 9a6 6 0 1 0 2-4.5"/><path d="M3 2.5V6h3.5"/></svg>
     </button>
 
-    <div class="photo-bar" id="photoBar" hidden>
-      <div class="meta"><b id="photoTitle"></b><small id="photoCaption"></small></div>
-      <button class="btn primary" id="photoDone">Done</button>
-      <label class="fade"><span>Model</span><input type="range" id="photoFade" min="0" max="100" value="50" aria-label="Blend between model and photo"><span>Photo</span></label>
-    </div>
 
     <div class="hint" id="hint"></div>
     <div class="piece-bar" id="pieceBar" hidden>

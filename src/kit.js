@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
+export { pointInPoly, polygonArea } from './space.js';
+
 // Box-project UVs in feet so tiled textures stay continuous across pieces.
 export function worldUV(g) {
   const p = g.attributes.position, n = g.attributes.normal, uv = g.attributes.uv;
@@ -139,14 +141,6 @@ export function feetInches(ft, { precision = 1 } = {}) {
   return `${f}' ${Number.isInteger(i) ? i : i.toFixed(1)}"`;
 }
 
-export function polygonArea(poly) {
-  let a = 0;
-  for (let i = 0; i < poly.length; i++) {
-    const [x0, z0] = poly[i], [x1, z1] = poly[(i + 1) % poly.length];
-    a += x0 * z1 - x1 * z0;
-  }
-  return a / 2;
-}
 
 export function centroid(poly) {
   let x = 0, z = 0;
@@ -154,14 +148,6 @@ export function centroid(poly) {
   return [x / poly.length, z / poly.length];
 }
 
-export function pointInPoly(x, z, poly) {
-  let inside = false;
-  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
-    const [xi, zi] = poly[i], [xj, zj] = poly[j];
-    if ((zi > z) !== (zj > z) && x < ((xj - xi) * (z - zi)) / (zj - zi) + xi) inside = !inside;
-  }
-  return inside;
-}
 
 // Seeded random numbers so the generated textures and city look the same every load.
 export function rng(seed = 1) {

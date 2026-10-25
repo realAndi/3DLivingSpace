@@ -13,18 +13,6 @@ const WAINSCOT = 4.0;
 // Hall bath: not photographed, so it follows the plan with the same finishes.
 const H2 = { x0: X(258), x1: X(440), z0: Z(513), z1: Z(699), tubX0: X(440), tubX1: X(504), tubZ0: Z(570) };
 
-// Footprints that block walking: [x0, z0, x1, z1]
-export const BATH_BLOCKS = [
-  [16.66, 5.5, 18.72, P.z1],          // primary vanity
-  [17.1, 3.85, P.x1, 5.55],           // primary toilet
-  [16.38, 3.55, 16.5, P.z1],          // shower glass
-  [H2.x0, Z(515), H2.x0 + 1.8, Z(592)],     // hall vanity
-  [H2.x0, Z(664) - 0.85, H2.x0 + 2.4, Z(664) + 0.85], // hall toilet
-  [H2.tubX0, H2.tubZ0, H2.tubX1, H2.z1],    // tub
-  [X(395), Z(270), X(447), Z(325)],         // washer/dryer
-  [X(492) - 0.9, Z(295) - 0.9, X(492) + 0.9, Z(295) + 0.9], // water heater
-];
-
 function roundedRect(w, h, r) {
   const s = new THREE.Shape();
   const x = -w / 2, y = -h / 2;

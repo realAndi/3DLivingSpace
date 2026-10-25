@@ -2,14 +2,16 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { createMaterials } from './materials.js';
-import { buildArchitecture, openings } from './architecture.js';
-import { buildKitchen, KITCHEN_BLOCKS } from './kitchen.js';
-import { buildBaths, BATH_BLOCKS } from './baths.js';
+import { buildArchitecture } from './architecture.js';
+import { buildKitchen } from './kitchen.js';
+import { buildBaths } from './baths.js';
 import { LayoutEditor } from './layout.js';
+import { TapeMeasure } from './measure.js';
+import { DesignSession } from './sync.js';
 import { buildSurroundings } from './surroundings.js';
 import { WalkControls } from './walk.js';
-import { ROOMS, ZONES, PHOTOS, PLAN_IMAGE, HEIGHT, UNIT, WALLS, ROOM_VIEWS, X, Z } from './plan.js';
-import { polygonArea, pointInPoly } from './kit.js';
+import { ROOMS, ZONES, PLAN_IMAGE, HEIGHT, UNIT, ROOM_VIEWS, X, Z } from './plan.js';
+import { polygonArea, wallPieces, inRect, insideUnit, OBSTACLES } from './space.js';
 
 const DEG = Math.PI / 180;
 const $ = (s) => document.querySelector(s);
@@ -122,23 +124,9 @@ for (const c of [doll, plan]) c.addEventListener('change', () => invalidate());
 
 // ---------------------------------------------------------------------------
 // Walking: collisions against walls (minus doorways), built-ins, furniture and shut doors.
-const doorways = openings.filter((o) => o.type !== 'window');
-const wallPieces = [];
-for (const w of WALLS) {
-  let parts = [w.axis === 'x' ? [w.x0, w.x1] : [w.z0, w.z1]];
-  for (const o of doorways) {
-    if (o.wall !== w.id) continue;
-    parts = parts.flatMap(([p, q]) => (o.b <= p || o.a >= q ? [[p, q]] : [...(o.a > p ? [[p, o.a]] : []), ...(o.b < q ? [[o.b, q]] : [])]));
-  }
-  for (const [p, q] of parts) wallPieces.push(w.axis === 'x' ? [p, w.z0, q, w.z1] : [w.x0, p, w.x1, q]);
-}
-const STATIC_BLOCKS = [...wallPieces, ...KITCHEN_BLOCKS, ...BATH_BLOCKS];
-const thresholds = doorways.map((o) => (o.w.axis === 'x' ? [o.a, o.w.z0, o.b, o.w.z1] : [o.w.x0, o.a, o.w.x1, o.b]));
-const inRect = (x, z, [x0, z0, x1, z1], r = 0) => x > x0 - r && x < x1 + r && z > z0 - r && z < z1 + r;
-const insideUnit = (x, z) => ROOMS.some((r) => pointInPoly(x, z, r.poly)) || thresholds.some((t) => inRect(x, z, t));
 function isBlocked(x, z, r) {
   if (!insideUnit(x, z)) return true;
-  if (STATIC_BLOCKS.some((b) => inRect(x, z, b, r))) return true;
+  if (OBSTACLES.some((b) => inRect(x, z, b, r))) return true;
   if (furniture.visible && layout.blocks(x, z, r * 0.6)) return true;
   return doors.some((d) => d.angle < 20 && inRect(x, z, d.closedRect, r));
 }
@@ -153,6 +141,7 @@ function aim(clientX, clientY, cam) {
 const pickables = () => [arch.walls, arch.floors, arch.trim, kitchen.solid, baths.solid, furniture.visible ? furniture : null, ...doors.map((d) => d.pivot)].filter(Boolean);
 
 function pickWalk(cx, cy) {
+  if (tape.active) return null;
   aim(cx, cy, walkCam);
   const h = ray.intersectObjects(pickables(), true)[0];
   if (!h) return null;
@@ -169,7 +158,7 @@ const walk = new WalkControls(walkCam, canvas, {
   isBlocked,
   pick: pickWalk,
   onTapDoor: (id) => toggleDoor(id),
-  onUserMove: () => { if (photo) exitPhoto({ keepView: true }); dismissHint(); invalidate(); },
+  onUserMove: () => { dismissHint(); invalidate(); },
 });
 walk.attachJoystick($('#joystick'), $('#joystick .knob'));
 const ENTRY_POSE = { x: X(285), y: HEIGHT.eye, z: Z(450), yaw: 90, pitch: -4 };
@@ -265,7 +254,7 @@ function project(x, y, z, cam) {
 }
 function updateLabels() {
   const visible = showLabels && mode !== 'walk';
-  labelLayer.hidden = !visible && !measures.length && !measurePreview;
+  labelLayer.hidden = !visible;
   const cam = activeCam();
   const ppf = mode === 'plan'
     ? stage.clientHeight / ((planCam.top - planCam.bottom) / planCam.zoom)
@@ -280,8 +269,6 @@ function updateLabels() {
     l.el.hidden = p.behind;
     l.el.style.transform = `translate(${p.x}px, ${p.y}px) translate(-50%, -50%)`;
   }
-  for (const m of measures) placeMeasureLabel(m, cam);
-  if (measurePreview) placeMeasureLabel(measurePreview, cam);
 }
 
 // Room highlight
@@ -329,7 +316,6 @@ function focusRoom(id) {
   const target = new THREE.Vector3(cx, 0, cz);
   if (mode === 'walk') {
     const v = ROOM_VIEWS[id];
-    exitPhoto({ keepView: true });
     walk.setPose({ x: X(v.at[0]), y: HEIGHT.eye, z: Z(v.at[1]), yaw: v.yaw, pitch: -4 }, { animate: true, duration: 1.1 });
   } else if (mode === 'plan') {
     const viewH = planCam.top - planCam.bottom;
@@ -351,9 +337,10 @@ const layout = new LayoutEditor({
   M, scene, root: furniture, canvas, stage, accentMat, fmt, insideUnit, invalidate,
   getCamera: () => activeCam(),
   getMode: () => mode,
-  obstacles: () => STATIC_BLOCKS,
+  obstacles: () => OBSTACLES,
   occluders: () => [arch.walls, kitchen.solid, baths.solid, ...doors.map((d) => d.pivot)],
   onSelect: (id) => { stage.classList.toggle('piece-active', id != null); if (id != null) dismissHint(); },
+  onOps: (ops) => session.queue(ops),
   onAdded: () => { if (narrow()) setSheet(false); },
   onEdit: () => {
     openTab('t-furniture');
@@ -369,181 +356,49 @@ const layout = new LayoutEditor({
 });
 
 // ---------------------------------------------------------------------------
-// Photo matching
-let photo = null;
-let furnitureBeforePhoto = null;
-const overlay = $('#photoOverlay');
-const fade = $('#photoFade');
-const photoList = $('#photoList');
-for (const p of PHOTOS) {
-  const b = document.createElement('button');
-  b.className = 'photo-btn';
-  b.dataset.photo = p.id;
-  b.innerHTML = `<img src="${p.thumb}" alt="" loading="lazy" style="aspect-ratio:${p.aspect}"><b>${p.title}</b><small>${p.caption}</small>`;
-  photoList.append(b);
-}
-photoList.addEventListener('click', (e) => {
-  const b = e.target.closest('[data-photo]');
-  if (b) showPhoto(b.dataset.photo);
+// Tape measure (every view)
+// Its labels get their own layer: room labels hide in Walk, measurements don't.
+const tapeLayer = document.createElement('div');
+tapeLayer.className = 'edit-layer';
+stage.append(tapeLayer);
+const tape = new TapeMeasure({
+  scene, canvas, stage, layer: tapeLayer, fmt, invalidate,
+  material: accentMat, floors: arch.floors,
+  getCamera: () => activeCam(),
+  getMode: () => mode,
+  targets: () => [arch.walls, arch.floors, arch.trim, kitchen.solid, baths.solid, furniture.visible ? furniture : null, ...doors.map((d) => d.pivot)].filter(Boolean),
+  onChange: () => renderTapeUI(),
 });
-fade.addEventListener('input', () => { overlay.style.opacity = String(fade.value / 100); });
-$('#photoDone').addEventListener('click', () => exitPhoto({ keepView: false }));
-
-function fitPhoto() {
-  if (!photo) return;
-  const w = stage.clientWidth, h = stage.clientHeight, pa = photo.aspect;
-  const [ow, oh] = w / h > pa ? [h * pa, h] : [w, w / pa];
-  walkCam.fov = (2 * Math.atan(Math.tan((photo.vfov / 2) * DEG) * (h / oh))) / DEG;
-  walkCam.updateProjectionMatrix();
-  Object.assign(overlay.style, { width: `${ow}px`, height: `${oh}px`, left: `${(w - ow) / 2}px`, top: `${(h - oh) / 2}px` });
-}
-
-function showPhoto(id, { opacity = 50, instant = false } = {}) {
-  const p = PHOTOS.find((x) => x.id === id);
-  if (!p) return;
-  if (mode !== 'walk') setMode('walk', { keepHash: true });
-  photo = p;
-  if (furnitureBeforePhoto === null) furnitureBeforePhoto = furniture.visible;
-  furniture.visible = false;
-  layout.select(null);
-  overlay.src = p.src;
-  overlay.hidden = false;
-  fade.value = opacity;
-  overlay.style.opacity = String(opacity / 100);
-  $('#photoTitle').textContent = p.title;
-  $('#photoCaption').textContent = p.caption;
-  $('#photoBar').hidden = false;
-  stage.classList.add('photo-active');
-  photoList.querySelectorAll('[data-photo]').forEach((b) => b.setAttribute('aria-current', String(b.dataset.photo === id)));
-  walk.setPose({ ...p.cam }, { animate: !instant, duration: 1.1 });
-  fitPhoto();
-  if (narrow()) panel.classList.add('hidden-sheet');
-  setSheet(false);
-  history.replaceState(null, '', `#photo-${id}`);
-  invalidate();
-}
-
-function exitPhoto({ keepView } = {}) {
-  if (!photo) return;
-  photo = null;
-  overlay.hidden = true;
-  $('#photoBar').hidden = true;
-  stage.classList.remove('photo-active');
-  panel.classList.remove('hidden-sheet');
-  photoList.querySelectorAll('[data-photo]').forEach((b) => b.setAttribute('aria-current', 'false'));
-  if (furnitureBeforePhoto !== null) furniture.visible = furnitureBeforePhoto && $('#optFurniture').checked;
-  furnitureBeforePhoto = null;
-  if (!keepView) fitWalkFov();
-  else fitWalkFov();
-  history.replaceState(null, '', `#${mode}`);
-  invalidate();
-}
-
-// ---------------------------------------------------------------------------
-// Measuring
-let measuring = false;
-let measureStart = null;
-let measurePreview = null;
-const measures = [];
-const measureBtn = $('#measureBtn');
-measureBtn.addEventListener('click', () => setMeasuring(!measuring));
-$('#clearMeasure').addEventListener('click', () => {
-  measures.splice(0).forEach(disposeMeasure);
-  clearPreview();
-  measureStart = null;
-  invalidate();
-});
+const tapeBtn = $('#tapeBtn'), tapeBar = $('#tapeBar');
 function setMeasuring(on) {
-  measuring = on;
+  tape.setActive(on);
   layout.enabled = !on;
-  if (on) layout.select(null);
-  measureBtn.setAttribute('aria-pressed', String(on));
-  measureBtn.textContent = on ? 'Measuring: tap two points' : 'Measure a distance';
-  stage.classList.toggle('measuring', on);
-  if (on && mode === 'walk') setMode('plan');
-  if (!on) { clearPreview(); measureStart = null; }
-  if (on && narrow()) setSheet(false);
-  invalidate();
+  if (on) { layout.select(null); dismissHint(); if (narrow()) setSheet(false); }
 }
-
-// Snap to wall faces within 4" and square up nearly-straight measurements.
-function snapPoint(p, from) {
-  const s = 0.35;
-  for (const w of WALLS) {
-    if (p.z > w.z0 - 0.1 && p.z < w.z1 + 0.1) { if (Math.abs(p.x - w.x0) < s) p.x = w.x0; else if (Math.abs(p.x - w.x1) < s) p.x = w.x1; }
-    if (p.x > w.x0 - 0.1 && p.x < w.x1 + 0.1) { if (Math.abs(p.z - w.z0) < s) p.z = w.z0; else if (Math.abs(p.z - w.z1) < s) p.z = w.z1; }
-  }
-  if (from) {
-    if (Math.abs(p.x - from.x) < 0.4) p.x = from.x;
-    if (Math.abs(p.z - from.z) < 0.4) p.z = from.z;
-  }
-  return p;
+function renderTapeUI() {
+  tapeBtn.setAttribute('aria-pressed', String(tape.active));
+  tapeBar.hidden = !tape.active && !tape.count;
+  stage.classList.toggle('measuring', tape.active);
+  $('#tapeText').textContent = tape.active
+    ? (tape.start ? 'Tap the second point' : coarse ? 'Tap two points to measure' : 'Click two points to measure')
+    : `${tape.count} measurement${tape.count === 1 ? '' : 's'}`;
+  $('#tapeDone').textContent = tape.active ? 'Done' : 'Measure';
+  $('#measureBtn').setAttribute('aria-pressed', String(tape.active));
 }
-function floorPoint(cx, cy, from) {
-  aim(cx, cy, activeCam());
-  const h = ray.intersectObject(arch.floors, true)[0];
-  if (!h) return null;
-  return snapPoint(new THREE.Vector3(h.point.x, 0.07, h.point.z), from);
-}
-function makeMeasure(a, b) {
-  const group = new THREE.Group();
-  const len = a.distanceTo(b);
-  const bar = new THREE.Mesh(new THREE.BoxGeometry(Math.max(len, 0.01), 0.02, 0.08), accentMat);
-  bar.position.copy(a).add(b).multiplyScalar(0.5);
-  bar.rotation.y = -Math.atan2(b.z - a.z, b.x - a.x);
-  group.add(bar);
-  for (const p of [a, b]) {
-    const dot = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.16, 0.02, 20), accentMat);
-    dot.position.copy(p);
-    group.add(dot);
-  }
-  group.traverse((o) => { o.renderOrder = 30; });
-  scene.add(group);
-  const el = document.createElement('div');
-  el.className = 'measure-label';
-  el.textContent = fmt(len).replace(`'`, `' `);
-  labelLayer.append(el);
-  return { group, el, a: a.clone(), b: b.clone(), len };
-}
-function disposeMeasure(m) {
-  scene.remove(m.group);
-  m.group.traverse((o) => o.geometry?.dispose());
-  m.el.remove();
-}
-function clearPreview() { if (measurePreview) { disposeMeasure(measurePreview); measurePreview = null; } }
-function placeMeasureLabel(m, cam) {
-  const p = project((m.a.x + m.b.x) / 2, 0.1, (m.a.z + m.b.z) / 2, cam);
-  m.el.hidden = p.behind || mode === 'walk' || m.len < 0.05;
-  m.el.style.transform = `translate(${p.x}px, ${p.y}px) translate(-50%, -150%)`;
-}
-function addMeasurePoint(p) {
-  if (!measureStart) {
-    measureStart = p;
-    clearPreview();
-    measurePreview = makeMeasure(p, p.clone().add(new THREE.Vector3(0.001, 0, 0)));
-  } else {
-    clearPreview();
-    if (p.distanceTo(measureStart) > 0.05) measures.push(makeMeasure(measureStart, p));
-    measureStart = null;
-  }
-  invalidate();
-}
+tapeBtn.addEventListener('click', () => setMeasuring(!tape.active));
+$('#measureBtn').addEventListener('click', () => setMeasuring(!tape.active));
+$('#tapeDone').addEventListener('click', () => setMeasuring(!tape.active));
+$('#tapeClear').addEventListener('click', () => { tape.clear(); renderTapeUI(); });
+$('#clearMeasure').addEventListener('click', () => { tape.clear(); renderTapeUI(); });
+canvas.addEventListener('pointerup', () => { if (tape.active) queueMicrotask(renderTapeUI); });
 
 // Taps in Dollhouse / Plan: measure, swing doors, double-tap to walk in.
 let down = null;
 let lastTap = { t: 0, x: 0, y: 0 };
 canvas.addEventListener('pointerdown', (e) => {
-  if (mode === 'walk' || down) return;
+  if (mode === 'walk' || down || tape.active) return;
   down = { x: e.clientX, y: e.clientY, t: performance.now(), id: e.pointerId };
   dismissHint();
-});
-canvas.addEventListener('pointermove', (e) => {
-  if (mode === 'walk' || !measuring || !measureStart || e.pointerType !== 'mouse') return;
-  const p = floorPoint(e.clientX, e.clientY, measureStart);
-  if (!p) return;
-  clearPreview();
-  measurePreview = makeMeasure(measureStart, p);
-  invalidate();
 });
 const endTap = (e) => {
   if (mode === 'walk' || !down || e.pointerId !== down.id) return;
@@ -551,11 +406,6 @@ const endTap = (e) => {
   const held = performance.now() - down.t;
   down = null;
   if (e.type === 'pointercancel' || moved > 7 || held > 500) return;
-  if (measuring) {
-    const p = floorPoint(e.clientX, e.clientY, measureStart);
-    if (p) addMeasurePoint(p);
-    return;
-  }
   aim(e.clientX, e.clientY, activeCam());
   const h = ray.intersectObjects(pickables(), true)[0];
   if (h?.object.userData.doorId) { toggleDoor(h.object.userData.doorId); return; }
@@ -589,6 +439,121 @@ function walkInAt(point) {
   walk.setPose({ x, y: HEIGHT.eye, z, yaw, pitch: -4 });
   setMode('walk');
 }
+
+// ---------------------------------------------------------------------------
+// Designs: saving, sharing, view-only, your own version
+const session = new DesignSession({
+  getDoc: () => layout.doc(),
+  onLoad: (doc, ss) => {
+    layout.load(doc, { readOnly: !ss.editable });
+    renderDesign(ss);
+  },
+  onRemote: (doc, ss) => layout.applyRemote(doc, ss.pendingUids()),
+  onState: (ss) => renderDesign(ss),
+});
+
+const ui = {
+  title: $('#designTitle'), author: $('#designAuthor'), status: $('#saveStatus'), line: $('#designLine'),
+  chip: $('#viewChip'), chipText: $('#viewChipText'), notice: $('#viewNotice'), noticeText: $('#viewNoticeText'),
+  shareGroup: $('#shareGroup'), card: $('#cardPreview'), viewLink: $('#viewLink'), editGroup: $('#editGroup'),
+  mcpUrl: $('#mcpUrl'), mine: $('#myDesigns'), add: $('#addGroup'), layoutTools: $('#layoutTools'),
+};
+ui.mcpUrl.value = `${location.origin}${new URL(document.baseURI).pathname}mcp`;
+
+const STATUS = {
+  loading: 'Opening…',
+  new: 'Not saved yet. Add a piece to save it and get a link.',
+  missing: 'This design doesn\'t exist. It may have been mistyped.',
+  offline: 'Can\'t reach the server, so nothing will be saved.',
+};
+function renderDesign(ss) {
+  const mine = ss.role === 'owner' || ss.role === 'new';
+  const named = ss.title || (ss.role === 'new' ? 'New design' : 'Untitled design');
+  ui.line.textContent = ss.role === 'loading' ? '' : `${named}${ss.author ? ` · by ${ss.author}` : ''}`;
+  if (document.activeElement !== ui.title) ui.title.value = ss.title;
+  if (document.activeElement !== ui.author) ui.author.value = ss.author;
+  ui.title.disabled = ui.author.disabled = !mine;
+  ui.status.dataset.state = ss.status;
+  ui.status.textContent = STATUS[ss.role]
+    ?? (ss.role === 'viewer' ? 'View only. Make your own version to change it.'
+      : ss.status === 'saving' ? 'Saving…' : ss.status === 'error' ? (ss.error || 'Not saved.') : 'Saved. Changes save as you go.');
+  // Visitors get a clear way to make their own.
+  const visitor = ss.role === 'viewer';
+  ui.chip.hidden = !visitor;
+  stage.classList.toggle('visitor', visitor);
+  ui.notice.hidden = !visitor && ss.role !== 'missing';
+  const who = ss.author ? `${ss.author}'s` : 'someone\'s';
+  ui.chipText.textContent = ss.title ? `${ss.title} · by ${ss.author || 'anonymous'}` : `Viewing ${who} design`;
+  ui.noticeText.textContent = ss.role === 'missing' ? 'This design doesn\'t exist.' : `This is ${who} design. Make your own version to move things around, add pieces or design it with AI.`;
+  ui.add.hidden = ui.layoutTools.hidden = !mine;
+  ui.shareGroup.hidden = !ss.id;
+  ui.editGroup.hidden = !ss.editUrl();
+  if (ss.id) {
+    ui.viewLink.value = ss.viewUrl();
+    const src = `api/designs/${ss.id}/card.png?v=${ss.version}`;
+    if (ui.card.getAttribute('src') !== src) ui.card.src = src;
+  }
+  const list = ss.ownedDesigns().sort((a, b) => (b.at ?? 0) - (a.at ?? 0));
+  ui.mine.innerHTML = '';
+  for (const d of list) {
+    const li = document.createElement('li');
+    const b = document.createElement('button');
+    b.className = 'piece-row';
+    b.dataset.design = d.id;
+    b.setAttribute('aria-current', String(d.id === ss.id));
+    const name = document.createElement('span');
+    name.textContent = d.title || 'Untitled design';
+    const when = document.createElement('small');
+    when.textContent = d.at ? new Date(d.at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '';
+    b.append(name, when);
+    li.append(b);
+    ui.mine.append(li);
+  }
+  $('#myDesignsEmpty').hidden = list.length > 0;
+  document.title = ss.title ? `${ss.title} · 3D Living Space` : '3D Living Space';
+}
+
+let infoTimer = 0;
+for (const input of [ui.title, ui.author]) {
+  input.addEventListener('input', () => {
+    clearTimeout(infoTimer);
+    infoTimer = setTimeout(() => session.setInfo({ title: ui.title.value.trim(), author: ui.author.value.trim() }), 400);
+  });
+}
+async function makeOwn() {
+  const doc = await session.fork();
+  if (doc) layout.toast('This copy is yours. Changes save as you go.');
+}
+$('#forkBtn').addEventListener('click', makeOwn);
+$('#forkChip').addEventListener('click', makeOwn);
+$('#newDesign').addEventListener('click', () => { session.newDesign(); openTab('t-furniture'); });
+ui.mine.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-design]');
+  if (b && b.dataset.design !== session.id) session.open(b.dataset.design);
+});
+
+async function copy(text, done) {
+  try {
+    await navigator.clipboard.writeText(text);
+    layout.toast(done);
+  } catch {
+    window.prompt('Copy this', text);
+  }
+}
+$('#copyView').addEventListener('click', async () => {
+  const url = session.viewUrl();
+  if (!url) return;
+  if (navigator.share && coarse) {
+    try { await navigator.share({ title: session.title || '3D Living Space', text: 'My version of this apartment', url }); return; } catch (err) { if (err?.name === 'AbortError') return; }
+  }
+  copy(url, 'Link copied');
+});
+$('#copyEdit').addEventListener('click', () => copy(session.editUrl(), 'Edit link copied. Keep it private.'));
+$('#copyMcp').addEventListener('click', () => copy(ui.mcpUrl.value, 'MCP server address copied'));
+$('#copyPrompt').addEventListener('click', () => {
+  const link = session.editUrl();
+  copy(link ? `Use 3D Living Space to furnish my design: ${link}` : 'Use 3D Living Space to make me a new design of the apartment, then give me the links.', 'Prompt copied');
+});
 
 // ---------------------------------------------------------------------------
 // Minimap (walk view)
@@ -630,7 +595,6 @@ mm.addEventListener('pointerdown', (e) => {
   const r = mm.getBoundingClientRect();
   const x = (e.clientX - r.left - mmT.ox) / mmT.s, z = (e.clientY - r.top - mmT.oz) / mmT.s;
   if (isBlocked(x, z, walk.radius)) return;
-  exitPhoto({ keepView: true });
   walk.setPose({ x, y: HEIGHT.eye, z, yaw: walk.yaw, pitch: walk.pitch }, { animate: true, duration: 0.7 });
   invalidate();
 });
@@ -677,7 +641,6 @@ function applyClipping() {
 
 function setMode(m, { keepHash = false } = {}) {
   if (!['dollhouse', 'plan', 'walk'].includes(m)) m = 'dollhouse';
-  if (m !== 'walk') exitPhoto({ keepView: true });
   mode = m;
   doll.enabled = m === 'dollhouse';
   plan.enabled = m === 'plan';
@@ -693,9 +656,9 @@ function setMode(m, { keepHash = false } = {}) {
   $('#minimap').hidden = !inside;
   $('#joystick').hidden = !(inside && coarse);
   scalebar.hidden = m !== 'plan';
-  if (inside && measuring) setMeasuring(false);
   if (inside) fitWalkFov();
-  if (!keepHash) history.replaceState(null, '', `#${m}`);
+  if (!keepHash) history.replaceState(null, '', `${location.pathname}${location.search}#${m}`);
+  tape.cancel();
   showHint();
   invalidate();
 }
@@ -718,7 +681,7 @@ function homePlan(animate = true) {
 $('#recenter').addEventListener('click', () => {
   if (mode === 'dollhouse') homeDollhouse();
   else if (mode === 'plan') homePlan();
-  else { exitPhoto({ keepView: false }); walk.setPose(ENTRY_POSE, { animate: true }); }
+  else walk.setPose(ENTRY_POSE, { animate: true });
   invalidate();
 });
 
@@ -735,8 +698,7 @@ function openTab(id) {
 document.querySelectorAll('.tab').forEach((t) => t.addEventListener('click', () => openTab(t.id)));
 
 $('#optFurniture').addEventListener('change', (e) => {
-  if (photo) furnitureBeforePhoto = e.target.checked;
-  else furniture.visible = e.target.checked;
+  furniture.visible = e.target.checked;
   layout.select(null);
   invalidate();
 });
@@ -805,7 +767,7 @@ function resize() {
   // Keep the dollhouse clear of the phone's top bar and bottom sheet.
   if (narrow()) dollCam.setViewOffset(w, h, 0, 34, w, h); else dollCam.clearViewOffset();
   dollCam.updateProjectionMatrix();
-  if (photo) fitPhoto(); else fitWalkFov();
+  fitWalkFov();
   fitPlan();
   // Re-frame the overviews when a phone turns between portrait and landscape.
   if (lastPortrait !== null && lastPortrait !== portrait()) { homeDollhouse(false); homePlan(false); }
@@ -836,49 +798,31 @@ function frame(now = performance.now()) {
   renderer.render(scene, activeCam());
   updateLabels();
   layout.updateOverlay(activeCam());
+  tape.update(activeCam());
   drawMinimap();
   updateScalebar();
   if (!shown) { shown = true; $('#loading').classList.add('done'); window.app.ready = true; }
 }
 
-// Start in the view named by the link (#dollhouse, #plan, #walk, #photo-kitchen).
+// Start in the view named by the link (#dollhouse, #plan, #walk).
 homeDollhouse(false);
 homePlan(false);
-function openFromHash(instant) {
+function openFromHash() {
   const h = location.hash.slice(1);
-  if (h.startsWith('photo-')) showPhoto(h.slice(6), { instant });
-  else if (h !== mode) setMode(h || 'dollhouse');
+  if (/^(dollhouse|plan|walk)$/.test(h)) { if (h !== mode) setMode(h, { keepHash: true }); }
+  else if (!mode) setMode('dollhouse', { keepHash: true });
 }
-openFromHash(true);
-addEventListener('hashchange', () => openFromHash(false));
+openFromHash();
+addEventListener('hashchange', openFromHash);
 if (!narrow()) setSheet(false);
+renderTapeUI();
+session.start();
 
-// Small hook for scripted screenshots and debugging.
+// Small hook for scripted screenshots and tests.
 window.app = {
   ready: false,
-  setMode, showPhoto, exitPhoto, focusRoom, toggleDoor, invalidate,
-  walk, doors, setSheet, layout,
-  setFade(v) { fade.value = v; overlay.style.opacity = String(v / 100); },
-  setPhotoCam(cam) {
-    if (!photo) return;
-    if (cam.vfov) { photo.vfov = cam.vfov; fitPhoto(); }
-    Object.assign(photo.cam, cam);
-    walk.setPose({ ...photo.cam });
-    renderer.render(scene, walkCam);
-  },
-  // Normal-shaded, texture-free render used to fit photo poses by edge alignment.
-  flat(on) {
-    const normal = new THREE.MeshNormalMaterial();
-    unit.traverse((o) => {
-      if (!o.isMesh) return;
-      if (on) { o.userData.mat ??= o.material; o.material = o.material.transparent ? o.material : normal; }
-      else if (o.userData.mat) o.material = o.userData.mat;
-    });
-    city.visible = !on && mode === 'walk';
-    scene.background = on ? new THREE.Color(0x000000) : (mode === 'walk' ? null : bgColor);
-    invalidate();
-  },
-  // Screen position of a world point in the current view (for scripted tests).
+  setMode, focusRoom, toggleDoor, invalidate, walk, doors, setSheet, layout, session, tape,
+  // Screen position of a world point in the current view.
   project(x, y, z) {
     const p = project(x, y, z, activeCam());
     const r = canvas.getBoundingClientRect();

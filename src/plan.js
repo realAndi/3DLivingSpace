@@ -143,32 +143,6 @@ export const ROOM_VIEWS = {
   coat: { at: [478, 440], yaw: 180 },
 };
 
-// ---------------------------------------------------------------------------
-// The photos, with the camera pose that reproduces each one in the model.
-// yaw is a compass bearing (0 = plan north/up, 90 = east); pitch and roll in
-// degrees. Poses were solved against the traced walls (corners and floor and
-// ceiling lines), then refined by aligning the model's edges to the photo's.
-// vfov is each photo's vertical field of view: the living room and kitchen
-// shots solve to 49.2° (about 28 mm equivalent), the bedroom to 58.5° (24 mm),
-// and the 0.5x bath shots are 90° landscape and 106° portrait.
-export const PHOTOS = [
-  { id: 'living', title: 'Living room', caption: 'From the entry hall, looking at the east window',
-    src: 'assets/photos/living-from-hall.jpg', thumb: 'assets/photos/living-from-hall-thumb.jpg', aspect: 4 / 3, vfov: 49.2,
-    cam: { x: 13.79, y: 5.53, z: 13.73, yaw: 102.6, pitch: -11.7, roll: -1.1 } },
-  { id: 'kitchen', title: 'Kitchen', caption: 'From the living area, looking into the kitchen corner',
-    src: 'assets/photos/kitchen.jpg', thumb: 'assets/photos/kitchen-thumb.jpg', aspect: 4 / 3, vfov: 49.2,
-    cam: { x: 33.08, y: 5.71, z: 14.24, yaw: 235.6, pitch: -8.9, roll: 0.2 } },
-  { id: 'primary', title: 'Primary bedroom', caption: 'From the doorway, looking at the east window',
-    src: 'assets/photos/primary-bedroom.jpg', thumb: 'assets/photos/primary-bedroom-thumb.jpg', aspect: 4 / 3, vfov: 58.5,
-    cam: { x: 22.78, y: 6.35, z: 11.72, yaw: 42.4, pitch: -13.3, roll: 1.3 } },
-  { id: 'bath-door', title: 'Primary bath', caption: 'From the shower, looking out the door',
-    src: 'assets/photos/primary-bath-door.jpg', thumb: 'assets/photos/primary-bath-door-thumb.jpg', aspect: 3 / 4, vfov: 106.1,
-    cam: { x: 14.59, y: 4.82, z: 3.56, yaw: 106.5, pitch: -9.4, roll: 1.2 } },
-  { id: 'bath-shower', title: 'Primary bath shower', caption: 'From the door, looking at the vanity and shower',
-    src: 'assets/photos/primary-bath-shower.jpg', thumb: 'assets/photos/primary-bath-shower-thumb.jpg', aspect: 4 / 3, vfov: 89.9,
-    cam: { x: 19.87, y: 5.32, z: 2.99, yaw: 243.2, pitch: -10.5, roll: 0.4 } },
-];
-
 export const UNIT = {
   title: 'Two Bedrooms · Two Baths',
   area: 821,

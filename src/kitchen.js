@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { Batch, Frame } from './kit.js';
-import { X, Z, HEIGHT } from './plan.js';
+import { HEIGHT } from './plan.js';
+import { KITCHEN_LINE } from './space.js';
 
 // L-shaped kitchen in the south-west corner of the great room.
 // The plan draws the outline; the cabinet sequence comes from the kitchen photo:
@@ -16,15 +17,9 @@ export const K = {
   fridgeH: 5.83,
 };
 
-const WEST = X(517), SOUTH = Z(699), PIER = X(804), NORTH_END = Z(497);
+const { west: WEST, south: SOUTH, pier: PIER, northEnd: NORTH_END } = KITCHEN_LINE;
 export const RUN_A_LEN = PIER - WEST;        // 11.1'
 export const RUN_B_LEN = SOUTH - NORTH_END;  // 7.8'
-
-// Footprints for collision: [x0, z0, x1, z1]
-export const KITCHEN_BLOCKS = [
-  [WEST, SOUTH - K.counterDepth - 0.8, PIER, SOUTH],
-  [WEST, NORTH_END, WEST + K.counterDepth, SOUTH],
-];
 
 function pullV(B, M, F, s, y0, len, t) {
   F.box(B, M.black, s - 0.017, y0, t + 0.075, s + 0.017, y0 + len, t + 0.11);

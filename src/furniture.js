@@ -1,68 +1,55 @@
 import * as THREE from 'three';
 import { Batch, Frame } from './kit.js';
+import { catalogByType, SWATCHES } from './catalog.js';
 
-// Furniture you can place yourself. Catalog sizes are typical retail sizes in
-// inches (width × depth × height); every piece can be resized after placing.
-// Width runs side to side as you face the piece's front, depth runs back to
-// front, so a bed's depth is its length.
-export const CATALOG = [
-  { type: 'sofa', name: 'Sofa', group: 'Living', w: 84, d: 36, h: 34 },
-  { type: 'loveseat', name: 'Loveseat', group: 'Living', w: 64, d: 36, h: 34, build: 'sofa' },
-  { type: 'sectional', name: 'Sectional', group: 'Living', w: 112, d: 84, h: 34 },
-  { type: 'armchair', name: 'Armchair', group: 'Living', w: 34, d: 34, h: 32 },
-  { type: 'ottoman', name: 'Ottoman', group: 'Living', w: 24, d: 24, h: 18 },
-  { type: 'coffeetable', name: 'Coffee table', group: 'Living', w: 48, d: 24, h: 18 },
-  { type: 'sidetable', name: 'Side table', group: 'Living', w: 20, d: 20, h: 24 },
-  { type: 'tvstand', name: 'TV stand', group: 'Living', w: 60, d: 16, h: 22 },
-  { type: 'tvstand-tv', name: 'TV stand + 55" TV', group: 'Living', w: 60, d: 16, h: 22, build: 'tvstand', tv: true },
-  { type: 'bookshelf', name: 'Bookshelf', group: 'Living', w: 32, d: 12, h: 72 },
-  { type: 'lamp', name: 'Floor lamp', group: 'Living', w: 14, d: 14, h: 62 },
-  { type: 'rug-8x10', name: "Rug 8' × 10'", group: 'Living', w: 120, d: 96, h: 0.5, build: 'rug' },
-  { type: 'rug-5x8', name: "Rug 5' × 8'", group: 'Living', w: 96, d: 60, h: 0.5, build: 'rug' },
-
-  { type: 'table', name: 'Dining table', group: 'Dining', w: 60, d: 36, h: 30 },
-  { type: 'roundtable', name: 'Round table', group: 'Dining', w: 42, d: 42, h: 30 },
-  { type: 'chair', name: 'Dining chair', group: 'Dining', w: 18, d: 20, h: 34 },
-  { type: 'bench', name: 'Bench', group: 'Dining', w: 48, d: 16, h: 18 },
-
-  { type: 'bed-king', name: 'King bed', group: 'Bedroom', w: 80, d: 86, h: 48, build: 'bed' },
-  { type: 'bed-queen', name: 'Queen bed', group: 'Bedroom', w: 64, d: 86, h: 48, build: 'bed' },
-  { type: 'bed-full', name: 'Full bed', group: 'Bedroom', w: 58, d: 80, h: 44, build: 'bed' },
-  { type: 'bed-twin', name: 'Twin bed', group: 'Bedroom', w: 42, d: 80, h: 40, build: 'bed' },
-  { type: 'nightstand', name: 'Nightstand', group: 'Bedroom', w: 22, d: 16, h: 24 },
-  { type: 'dresser', name: 'Dresser', group: 'Bedroom', w: 60, d: 18, h: 32 },
-  { type: 'chest', name: 'Tall dresser', group: 'Bedroom', w: 36, d: 18, h: 48, build: 'dresser' },
-  { type: 'desk', name: 'Desk', group: 'Bedroom', w: 48, d: 24, h: 30 },
-  { type: 'officechair', name: 'Desk chair', group: 'Bedroom', w: 26, d: 26, h: 40 },
-
-  { type: 'plant', name: 'Plant', group: 'Other', w: 18, d: 18, h: 48 },
-  { type: 'box', name: 'Custom piece', group: 'Other', w: 36, d: 24, h: 30 },
-];
-export const catalogByType = Object.fromEntries(CATALOG.map((c) => [c.type, c]));
-
-// Color choices. `null` keeps each piece's own finish.
-export const SWATCHES = [
-  { key: null, name: 'Default', css: 'conic-gradient(#8e8984 0 25%, #7b5a3e 0 50%, #e9e5dd 0 75%, #5f5b56 0)' },
-  { key: 'oak', name: 'Light oak', css: '#c9a170' },
-  { key: 'walnut', name: 'Walnut', css: '#6e4e35' },
-  { key: 'white', name: 'White', hex: 0xf1efea },
-  { key: 'black', name: 'Black', hex: 0x232323 },
-  { key: 'gray', name: 'Gray', hex: 0x8e8984 },
-  { key: 'charcoal', name: 'Charcoal', hex: 0x4f4c48 },
-  { key: 'beige', name: 'Beige', hex: 0xd6cbb8 },
-  { key: 'navy', name: 'Navy', hex: 0x2f3d56 },
-  { key: 'sage', name: 'Sage', hex: 0x8b9a7e },
-  { key: 'rust', name: 'Rust', hex: 0xa85c3f },
-];
+// 3D models for placed furniture: the catalog pieces, and custom assets built
+// from primitives (see src/design.js for their format).
+export { CATALOG, catalogByType, SWATCHES, isFlat, footprint, bounds, nearPiece } from './catalog.js';
 
 const colorCache = new Map();
 function swatchMaterial(M, key) {
+  if (!key) return null;
   if (key === 'oak') return M.oak;
   if (key === 'walnut') return M.walnut;
   const s = SWATCHES.find((x) => x.key === key);
-  if (!s?.hex) return null;
-  if (!colorCache.has(key)) colorCache.set(key, new THREE.MeshStandardMaterial({ color: s.hex, roughness: 0.85 }));
+  const hex = s?.hex ?? (/^#[0-9a-f]{6}$/.test(key) ? parseInt(key.slice(1), 16) : null);
+  if (hex == null) return null;
+  if (!colorCache.has(key)) colorCache.set(key, new THREE.MeshStandardMaterial({ color: hex, roughness: 0.85 }));
   return colorCache.get(key);
+}
+
+// Materials for asset parts, one per color and finish.
+const FINISH = {
+  matte: { roughness: 0.9 }, satin: { roughness: 0.55 }, gloss: { roughness: 0.18 },
+  metal: { roughness: 0.32, metalness: 1 }, glass: { roughness: 0.05, transparent: true, opacity: 0.32, depthWrite: false },
+  fabric: { roughness: 1 }, wood: { roughness: 0.62 },
+};
+const partCache = new Map();
+function partMaterial(color, finish) {
+  const key = `${color}|${finish}`;
+  if (!partCache.has(key)) partCache.set(key, new THREE.MeshStandardMaterial({ color: parseInt(color.slice(1), 16), ...(FINISH[finish] ?? FINISH.matte) }));
+  return partCache.get(key);
+}
+const UNIT_GEO = {
+  box: () => new THREE.BoxGeometry(1, 1, 1),
+  cylinder: () => new THREE.CylinderGeometry(0.5, 0.5, 1, 28),
+  cone: () => new THREE.CylinderGeometry(0, 0.5, 1, 28),
+  sphere: () => new THREE.SphereGeometry(0.5, 28, 18),
+};
+
+// Parts in inches, piece frame: origin at the footprint center on the floor.
+function buildAsset(B, asset, item, colorOverride) {
+  const sx = (item.w * 12) / asset.w, sy = (item.h * 12) / asset.h, sz = (item.d * 12) / asset.d;
+  const scale = new THREE.Matrix4().makeScale(sx / 12, sy / 12, sz / 12);
+  B.push(scale);
+  for (const p of asset.parts) {
+    const g = UNIT_GEO[p.shape]();
+    g.scale(...p.size);
+    g.applyMatrix4(new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(...p.rot.map((d) => (d * Math.PI) / 180), 'XYZ')));
+    g.translate(...p.at);
+    B.add(g, colorOverride ?? partMaterial(p.color, p.finish));
+  }
+  B.pop();
 }
 
 // ---------------------------------------------------------------------------
@@ -254,39 +241,23 @@ const BUILDERS = {
 
 // One placed piece, as a group positioned and turned in the room.
 // item: { id, type, name, w, d, h (feet), x, z (center, feet), rot (degrees clockwise on the plan), color }
-export function buildPiece(M, item) {
-  const def = catalogByType[item.type] ?? catalogByType.box;
-  const B = new Batch(`piece-${item.id}`);
-  const F = new Frame(0, -item.d / 2, [1, 0], [0, 1]);
-  BUILDERS[def.build ?? def.type](B, M, F, item.w, item.d, item.h, swatchMaterial(M, item.color), { tv: def.tv });
+export function buildPiece(M, item, assets = {}) {
+  const B = new Batch(`piece-${item.uid}`);
+  const asset = item.type === 'asset' ? assets[item.asset] : null;
+  if (asset) buildAsset(B, asset, item, swatchMaterial(M, item.color));
+  else {
+    const def = catalogByType[item.type] ?? catalogByType.box;
+    const F = new Frame(0, -item.d / 2, [1, 0], [0, 1]);
+    BUILDERS[def.build ?? def.type](B, M, F, item.w, item.d, item.h, swatchMaterial(M, item.color), { tv: def.tv });
+  }
   const g = B.build();
   g.position.set(item.x, 0, item.z);
   g.rotation.y = -THREE.MathUtils.degToRad(item.rot);
-  g.traverse((o) => { if (o.isMesh) o.userData.pieceId = item.id; });
-  g.userData.pieceId = item.id;
+  g.traverse((o) => { if (o.isMesh) o.userData.pieceId = item.uid; });
+  g.userData.pieceId = item.uid;
   return g;
 }
 
-// Rugs lie flat and never block walking.
-export const isFlat = (item) => (catalogByType[item.type]?.build ?? item.type) === 'rug';
 
-// Corners of the footprint in world space.
-export function footprint(item, pad = 0) {
-  const a = -THREE.MathUtils.degToRad(item.rot), c = Math.cos(a), s = Math.sin(a);
-  const hw = item.w / 2 + pad, hd = item.d / 2 + pad;
-  return [[-hw, -hd], [hw, -hd], [hw, hd], [-hw, hd]].map(([lx, lz]) => [item.x + lx * c + lz * s, item.z - lx * s + lz * c]);
-}
 
-export function bounds(item) {
-  const pts = footprint(item);
-  const xs = pts.map((p) => p[0]), zs = pts.map((p) => p[1]);
-  return [Math.min(...xs), Math.min(...zs), Math.max(...xs), Math.max(...zs)];
-}
 
-// Is (x, z) within r of the piece's footprint?
-export function nearPiece(item, x, z, r) {
-  const a = -THREE.MathUtils.degToRad(item.rot), c = Math.cos(a), s = Math.sin(a);
-  const dx = x - item.x, dz = z - item.z;
-  const lx = dx * c - dz * s, lz = dx * s + dz * c;
-  return Math.abs(lx) < item.w / 2 + r && Math.abs(lz) < item.d / 2 + r;
-}

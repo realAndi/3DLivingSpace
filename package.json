@@ -1,0 +1,21 @@
+{
+  "name": "3dlivingspace",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A to-scale 3D model of a 2 bed / 2 bath apartment that anyone can furnish, with an MCP server so AI agents can design it too.",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "@resvg/resvg-js": "^2.6.2",
+    "zod": "^4.6.7"
+  }
+}
