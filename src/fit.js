@@ -1,63 +1,128 @@
 // Will it fit? Overlap, clearance and free-spot checks for placed pieces, used
 // by the browser (clearance lines, snapping) and the server (MCP tools). Feet.
-// `U` is a built unit (src/unit.js buildUnit).
+// `U` is a built unit (src/unit.js buildUnit). Pieces collide by their parts
+// (src/hitbox.js), so a chair tucks under a table; `assets` (the design's
+// custom assets, by id or as a list) gives custom pieces their parts.
 
-import { footprint, bounds, isFlat } from './catalog.js';
+import { footprint, isFlat } from './catalog.js';
 import { overlap, rectPoly, frontOf, polyBounds } from './geometry.js';
+import { pieceBody, pieceParts, placeBody, fixtureParts } from './hitbox.js';
 
 export { overlap };
 
-// Distance from each side of the piece's bounding box to the nearest wall,
-// fixture or other standing piece, along that axis.
+// Where a horizontal (axis 0) or vertical (axis 1) line at `c` crosses a
+// convex polygon: [lo, hi] along the axis, or null.
+function spanAt(poly, axis, c) {
+  const o = 1 - axis;
+  let lo = Infinity, hi = -Infinity;
+  for (let i = 0; i < poly.length; i++) {
+    const p = poly[i], q = poly[(i + 1) % poly.length];
+    if ((p[o] < c && q[o] < c) || (p[o] > c && q[o] > c)) continue;
+    const v = p[o] === q[o] ? [p[axis], q[axis]] : [p[axis] + ((c - p[o]) / (q[o] - p[o])) * (q[axis] - p[axis])];
+    for (const x of v) { if (x < lo) lo = x; if (x > hi) hi = x; }
+  }
+  return lo <= hi ? [lo, hi] : null;
+}
+
+// Distance from each side of the piece to the nearest wall, fixture or other
+// standing piece, along that axis. Measured between the outlines, so a turned
+// piece's corner counts, not its bounding box. Each side: { side, axis, sign,
+// edge, at, dist }: the gap runs from (edge, at) for dist along the axis.
 export function clearances(item, others = [], obstacles = []) {
-  const b = bounds(item);
-  const obs = [...obstacles, ...others.filter((o) => o !== item && o.uid !== item.uid && !isFlat(o)).map(bounds)];
+  const poly = footprint(item), b = polyBounds(poly), square = item.rot % 90 === 0;
+  const obs = [
+    ...obstacles.map((r) => ({ poly: rectPoly(r), b: r, square: true })),
+    ...others.filter((o) => o !== item && o.uid !== item.uid && !isFlat(o))
+      .map((o) => { const op = footprint(o); return { poly: op, b: polyBounds(op), square: o.rot % 90 === 0 }; }),
+  ];
   const sides = [
-    { side: 'east', axis: 0, sign: 1, edge: b[2], lo: b[1], hi: b[3] },
-    { side: 'west', axis: 0, sign: -1, edge: b[0], lo: b[1], hi: b[3] },
-    { side: 'south', axis: 1, sign: 1, edge: b[3], lo: b[0], hi: b[2] },
-    { side: 'north', axis: 1, sign: -1, edge: b[1], lo: b[0], hi: b[2] },
+    { side: 'east', axis: 0, sign: 1, lo: b[1], hi: b[3] },
+    { side: 'west', axis: 0, sign: -1, lo: b[1], hi: b[3] },
+    { side: 'south', axis: 1, sign: 1, lo: b[0], hi: b[2] },
+    { side: 'north', axis: 1, sign: -1, lo: b[0], hi: b[2] },
   ];
   const out = [];
   for (const s of sides) {
+    const o = 1 - s.axis;
     let best = null;
-    for (const o of obs) {
-      const [olo, ohi] = s.axis === 0 ? [o[1], o[3]] : [o[0], o[2]];
-      const ov0 = Math.max(s.lo, olo), ov1 = Math.min(s.hi, ohi);
+    for (const ob of obs) {
+      const ov0 = Math.max(s.lo, ob.b[o]), ov1 = Math.min(s.hi, ob.b[o + 2]);
       if (ov1 - ov0 < 0.02) continue;
-      const face = s.sign > 0 ? o[s.axis] : o[s.axis + 2];
-      const dist = (face - s.edge) * s.sign;
-      if (dist < -0.01) continue;
-      if (!best || dist < best.dist) best = { dist: Math.max(0, dist), at: (ov0 + ov1) / 2 };
+      let near = null;
+      if (square && ob.square) {
+        // Both square to the plan: the gap is the same all along the overlap.
+        const edge = s.sign > 0 ? b[s.axis + 2] : b[s.axis];
+        near = { edge, at: (ov0 + ov1) / 2, dist: s.sign > 0 ? ob.b[s.axis] - edge : edge - ob.b[s.axis + 2] };
+      } else {
+        // The gap is convex along the overlap: its least is at an end or a corner.
+        const cs = [(ov0 + ov1) / 2, ov0 + 1e-6, ov1 - 1e-6];
+        for (const p of [...poly, ...ob.poly]) if (p[o] > ov0 && p[o] < ov1) cs.push(p[o]);
+        for (const c of cs) {
+          const a = spanAt(poly, s.axis, c), e = spanAt(ob.poly, s.axis, c);
+          if (!a || !e) continue;
+          const edge = s.sign > 0 ? a[1] : a[0];
+          const dist = s.sign > 0 ? e[0] - a[1] : a[0] - e[1];
+          if (!near || dist < near.dist - 1e-4) near = { dist, edge, at: c };
+        }
+      }
+      if (!near || near.dist < -0.01) continue;
+      if (!best || near.dist < best.dist) best = { ...near, dist: Math.max(0, near.dist) };
     }
-    if (best && best.dist < 15) out.push({ ...s, ...best });
+    if (best && best.dist < 15) out.push({ side: s.side, axis: s.axis, sign: s.sign, ...best });
   }
   return out;
 }
 
-// What is wrong with where a piece sits, as short sentences.
-export function problems(item, others = [], U = null) {
+// What is wrong with where a piece sits, as short sentences. Parts that only
+// meet, or pass over and under each other (a chair's seat under a table),
+// are fine.
+export function problems(item, others = [], U = null, assets = null) {
   if (!U) return [];
   const out = [];
-  const poly = footprint(item);
+  const body = pieceBody(item, assets), parts = placeBody(body, item.x, item.z);
+  const box = [item.x + body.box[0], item.z + body.box[1], item.x + body.box[2], item.z + body.box[3]];
   // Corners pulled in a hair, so a piece flush against a wall still counts as inside.
-  if (footprint(item, -0.04).some(([x, z]) => !U.insideUnit(x, z))) out.push('sticks out past a wall or outside the unit');
-  for (const w of U.wallRects) if (overlap(poly, rectPoly(w))) { out.push('runs into a wall'); break; }
-  for (const f of U.fixtures) if (f.blocks && overlap(poly, f.poly)) out.push(`overlaps the ${f.name.toLowerCase()}`);
+  if (parts.some((p) => inset(p.poly, 0.04).some(([x, z]) => !U.insideUnit(x, z)))) out.push('sticks out past a wall or outside the unit');
+  for (const s of collisionShapes(U)) {
+    if (s.kind === 'trim' || !meets(parts, [s])) continue;
+    out.push(s.kind === 'wall' ? 'runs into a wall' : `overlaps the ${s.name.toLowerCase()}`);
+  }
   if (!isFlat(item)) {
-    for (const d of U.doorSwings) if (overlap(poly, d.poly, 0.1)) out.push(`blocks the ${d.name.toLowerCase()} from opening`);
+    for (const d of U.doorSwings) if (parts.some((p) => overlap(p.poly, d.poly, 0.1))) out.push(`blocks the ${d.name.toLowerCase()} from opening`);
     for (const o of others) {
       if (o === item || o.uid === item.uid || isFlat(o)) continue;
-      if (overlap(poly, footprint(o))) out.push(`overlaps ${o.name}${o.uid ? ` (${o.uid})` : ''}`);
+      const ob = pieceBody(o, assets).box;
+      if (o.x + ob[0] >= box[2] || o.x + ob[2] <= box[0] || o.z + ob[1] >= box[3] || o.z + ob[3] <= box[1]) continue;
+      if (meets(parts, pieceParts(o, assets))) out.push(`overlaps ${o.name}${o.uid ? ` (${o.uid})` : ''}`);
     }
   }
   return [...new Set(out)];
 }
 
+// Do any two parts overlap by more than ½" across and in height?
+function meets(a, b, tol = 0.04) {
+  for (const p of a) for (const q of b) {
+    if (Math.min(p.y1, q.y1) - Math.max(p.y0, q.y0) <= tol) continue;
+    if (p.aabb[0] >= q.aabb[2] - tol || q.aabb[0] >= p.aabb[2] - tol || p.aabb[1] >= q.aabb[3] - tol || q.aabb[1] >= p.aabb[3] - tol) continue;
+    if (overlap(p.poly, q.poly, tol)) return true;
+  }
+  return false;
+}
+
+// A convex outline with its corners pulled in toward its middle by up to r.
+function inset(poly, r) {
+  const cx = poly.reduce((a, p) => a + p[0], 0) / poly.length, cz = poly.reduce((a, p) => a + p[1], 0) / poly.length;
+  return poly.map(([x, z]) => {
+    const dx = cx - x, dz = cz - z, len = Math.hypot(dx, dz);
+    const k = len > 1e-9 ? Math.min(1, r / len) : 0;
+    return [x + dx * k, z + dz * k];
+  });
+}
+
 // Spots where a w × d piece fits in a room without hitting anything, best first.
 // With againstWall, the piece's back is slid up to the nearest wall (its
 // baseboard) or fixture.
-export function findSpots({ w, d, h = 3, room = null, againstWall = true, items = [], count = 5, type = 'box', U }) {
+export function findSpots({ w, d, h = 3, room = null, againstWall = true, items = [], count = 5, type = 'box', U, assets = null }) {
   const match = (r) => r.id === room || r.name.toLowerCase() === String(room).toLowerCase();
   const rooms = room ? U.rooms.filter(match) : U.rooms.filter((r) => !r.minor && !r.outdoor && r.kind !== 'bath');
   const found = [];
@@ -83,7 +148,7 @@ export function findSpots({ w, d, h = 3, room = null, againstWall = true, items 
           if (seen.has(key)) continue;
           seen.add(key);
           if (!footprint(cand, -0.04).every(([px, pz]) => U.roomAt(px, pz)?.id === r.id)) continue;
-          if (problems(cand, items, U).length) continue;
+          if (problems(cand, items, U, assets).length) continue;
           // Keep spots apart, and prefer ones farther from doors.
           if (found.some((f) => Math.hypot(f.x - cand.x, f.z - cand.z) < 2 && f.rot === rot)) continue;
           const doorGap = doors.length ? Math.min(...doors.map(([dx, dz]) => Math.hypot(dx - cand.x, dz - cand.z))) : 8;
@@ -99,9 +164,12 @@ export function findSpots({ w, d, h = 3, room = null, againstWall = true, items 
 // ---------------------------------------------------------------------------
 // Collisions while placing furniture: what a piece may not overlap, each shape
 // with the heights it occupies, so a coffee table can slide under a window sill
-// that stops a sofa. Pieces may touch (sit flush against walls, trim and each
-// other) but not overlap. The trim matches src/architecture.js: baseboards
-// stand ½" proud of the wall, door casings ¾" and 3½" wide, window stools 1¼".
+// that stops a sofa, and a chair's seat under a table top that stops its back.
+// Two pieces collide only where a part of one overlaps a part of the other
+// both on the plan and in height. Pieces may touch (sit flush against walls,
+// trim and each other) but not overlap. The trim matches src/architecture.js:
+// baseboards stand ½" proud of the wall, door casings ¾" and 3½" wide, window
+// stools 1¼".
 
 const BASEBOARD = { t: 0.045, h: 0.42 };
 const CASING = { t: 0.06, w: 0.29 };
@@ -115,22 +183,29 @@ const edgePoly = (p, u, n, s0, s1, t0, t1) => [[s0, t0], [s1, t0], [s1, t1], [s0
 
 const shapeCache = new WeakMap();
 // Walls, trim and built-ins of a unit (not furniture), built once per unit.
+// Built-ins come as their parts (src/hitbox.js): an island's overhang, wall
+// cabinets and closet rods at their real heights.
 export function collisionShapes(U) {
   if (!U) return [];
   if (shapeCache.has(U)) return shapeCache.get(U);
   const out = U.wallRects.map((r) => shape(rectPoly(r), 0, 99, 'wall'));
   const step = 1 / 24;
-  // Baseboards: along room edges wherever the wall behind stands on the floor.
+  // Along room edges wherever the wall behind stands on the floor: the wall's
+  // true face (the grid of wall cells can sit up to ¼" behind the outline, so
+  // a strip fills that in and pieces stop at the outline), and the baseboard.
   for (const e of U.edges) {
     const r = U.roomById[e.room];
-    if (r.outdoor || HARD_FLOORS.has(r.floor)) continue;
+    const base = !r.outdoor && !HARD_FLOORS.has(r.floor);
     let s0 = null;
     for (let s = step / 2; s <= e.len; s += step) {
       const back = U.floorSolidAt(e.p[0] + e.u[0] * s + e.n[0] / 24, e.p[1] + e.u[1] * s + e.n[1] / 24);
       if (back && s0 === null) s0 = s - step / 2;
       if ((!back || s + step > e.len) && s0 !== null) {
         const s1 = back ? e.len : s - step / 2;
-        if (s1 - s0 > 0.05) out.push(shape(edgePoly(e.p, e.u, e.n, s0, s1, -BASEBOARD.t, 0), 0, BASEBOARD.h, 'trim'));
+        if (s1 - s0 > 0.05) {
+          out.push(shape(edgePoly(e.p, e.u, e.n, s0, s1, 0, 1 / 12), 0, 99, 'wall'));
+          if (base) out.push(shape(edgePoly(e.p, e.u, e.n, s0, s1, -BASEBOARD.t, 0), 0, BASEBOARD.h, 'trim'));
+        }
         s0 = null;
       }
     }
@@ -150,16 +225,26 @@ export function collisionShapes(U) {
       out.push(shape(edgePoly(o.p, o.u, o.n, s0, s1, o.t1, o.t1 + CASING.t), 0, top, 'trim'));
     }
   }
-  for (const f of U.fixtures) if (f.blocks) out.push(shape(f.poly, 0, f.h, 'fixture'));
+  for (const f of U.fixtures) {
+    const ceiling = U.roomById?.[f.room]?.ceiling ?? U.heights?.ceiling ?? 9;
+    for (const p of fixtureParts(f, ceiling)) out.push({ ...p, kind: 'fixture', id: f.id, name: f.name });
+  }
   shapeCache.set(U, out);
   return out;
 }
 
-// The shapes a piece must keep clear of: the unit's, plus the other standing pieces.
-export function blockersFor(item, U, items = []) {
-  const own = collisionShapes(U).filter((s) => s.y0 < item.h - 1e-3);
+// The shapes a piece must keep clear of: the unit's, plus the parts of the
+// other standing pieces. Only what reaches below the piece's top can hit it.
+export function blockersFor(item, U, items = [], assets = null) {
+  const top = pieceBody(item, assets).y1 - 1e-3;
+  const own = collisionShapes(U).filter((s) => s.y0 < top);
   if (isFlat(item)) return own;
-  return [...own, ...items.filter((o) => o.uid !== item.uid && !isFlat(o)).map((o) => shape(footprint(o), 0, o.h, 'piece'))];
+  const out = [...own];
+  for (const o of items) {
+    if (o.uid === item.uid || isFlat(o)) continue;
+    for (const p of pieceParts(o, assets)) if (p.y0 < top) out.push({ ...p, kind: 'piece', uid: o.uid });
+  }
+  return out;
 }
 
 // Axis-aligned boxes of the trim, for clearance lines and the wall magnet.
@@ -167,9 +252,10 @@ export function trimRects(U) {
   return collisionShapes(U).filter((s) => s.kind === 'trim' && s.y0 < 0.05).map((s) => s.aabb);
 }
 
-// How far, and which way, to push polygon a out of polygon b (separating-axis
-// minimum translation), or null when they only touch or are apart.
-function separation(a, b) {
+// How far, and which way, to push polygon a (moved by ox, oz) out of polygon
+// b (separating-axis minimum translation), or null when they only touch or
+// are apart.
+function separation(a, ox, oz, b) {
   let best = null;
   for (const poly of [a, b]) {
     for (let i = 0; i < poly.length; i++) {
@@ -178,9 +264,10 @@ function separation(a, b) {
       const len = Math.hypot(nx, nz);
       if (len < 1e-9) continue;
       nx /= len; nz /= len;
+      const off = ox * nx + oz * nz;
       let aMin = Infinity, aMax = -Infinity, bMin = Infinity, bMax = -Infinity;
-      for (const [x, z] of a) { const p = x * nx + z * nz; aMin = Math.min(aMin, p); aMax = Math.max(aMax, p); }
-      for (const [x, z] of b) { const p = x * nx + z * nz; bMin = Math.min(bMin, p); bMax = Math.max(bMax, p); }
+      for (const [x, z] of a) { const p = x * nx + z * nz + off; if (p < aMin) aMin = p; if (p > aMax) aMax = p; }
+      for (const [x, z] of b) { const p = x * nx + z * nz; if (p < bMin) bMin = p; if (p > bMax) bMax = p; }
       const out1 = aMax - bMin, out2 = bMax - aMin;   // push a toward -n, or toward +n
       if (out1 <= TOUCH || out2 <= TOUCH) return null;
       const depth = Math.min(out1, out2);
@@ -190,30 +277,36 @@ function separation(a, b) {
   return best;
 }
 
-const near = (a, b) => a[0] < b[2] && a[2] > b[0] && a[1] < b[3] && a[3] > b[1];
-function deepest(item, x, z, shapes) {
-  const poly = footprint({ ...item, x, z });
-  const box = polyBounds(poly);
+// The deepest overlap of a body (src/hitbox.js pieceBody) at (x, z) with any
+// shape, part by part: only parts that share some height can meet.
+function deepest(body, x, z, shapes) {
+  const bx0 = x + body.box[0], bz0 = z + body.box[1], bx1 = x + body.box[2], bz1 = z + body.box[3];
   let hit = null;
   for (const s of shapes) {
-    if (!near(box, s.aabb)) continue;
-    const sep = separation(poly, s.poly);
-    if (sep && (!hit || sep.depth > hit.depth)) hit = sep;
+    const a = s.aabb;
+    if (a[0] >= bx1 || a[2] <= bx0 || a[1] >= bz1 || a[3] <= bz0) continue;
+    for (const p of body.parts) {
+      if (p.y0 >= s.y1 - TOUCH || s.y0 >= p.y1 - TOUCH) continue;
+      if (a[0] >= x + p.box[2] || a[2] <= x + p.box[0] || a[1] >= z + p.box[3] || a[3] <= z + p.box[1]) continue;
+      const sep = separation(p.pts, x, z, s.poly);
+      if (sep && (!hit || sep.depth > hit.depth)) hit = sep;
+    }
   }
   return hit;
 }
 
 // Does the piece, where it is now, overlap any of the shapes?
-export function collides(item, shapes) {
-  return !!deepest(item, item.x, item.z, shapes);
+export function collides(item, shapes, assets = null) {
+  return !!deepest(pieceBody(item, assets), item.x, item.z, shapes);
 }
 
 // Push the piece out of whatever it overlaps, moving it at most `reach` feet.
 // Returns the free position, or null when there is no room within reach.
-export function pushOut(item, shapes, reach = 0.5) {
+export function pushOut(item, shapes, reach = 0.5, assets = null) {
+  const body = pieceBody(item, assets);
   let x = item.x, z = item.z;
   for (let k = 0; k < 24; k++) {
-    const hit = deepest(item, x, z, shapes);
+    const hit = deepest(body, x, z, shapes);
     if (!hit) return Math.hypot(x - item.x, z - item.z) <= reach ? { x, z } : null;
     const push = hit.depth - TOUCH / 2;
     x += hit.dir[0] * push; z += hit.dir[1] * push;
@@ -223,23 +316,31 @@ export function pushOut(item, shapes, reach = 0.5) {
 
 // Move the piece toward (tx, tz) in short steps, sliding along whatever it
 // meets and stopping flush against it. Returns where it ends up. A piece that
-// already overlaps something moves freely until it is clear.
-export function slideTo(item, tx, tz, shapes) {
-  if (collides(item, shapes)) return { x: tx, z: tz };
+// already overlaps something moves freely until it is clear. Steps are
+// shorter than the piece's thinnest part (a leg, a chair's back), so nothing
+// thin passes through anything thin.
+export function slideTo(item, tx, tz, shapes, assets = null) {
+  const body = pieceBody(item, assets);
+  if (deepest(body, item.x, item.z, shapes)) return { x: tx, z: tz };
   const dx = tx - item.x, dz = tz - item.z, dist = Math.hypot(dx, dz);
   if (dist < 1e-6) return { x: item.x, z: item.z };
-  const stepLen = Math.min(0.15, Math.max(0.02, Math.min(item.w, item.d) / 3));
+  const stepLen = Math.min(0.15, Math.max(0.02, Math.min(item.w / 3, item.d / 3, body.thin + 0.04)));
   const steps = Math.min(400, Math.ceil(dist / stepLen));
+  // Only what the path can reach.
+  const pad = stepLen + 0.05, b = body.box;
+  const x0 = Math.min(item.x, tx) + b[0] - pad, x1 = Math.max(item.x, tx) + b[2] + pad;
+  const z0 = Math.min(item.z, tz) + b[1] - pad, z1 = Math.max(item.z, tz) + b[3] + pad;
+  const near = shapes.filter((s) => s.aabb[0] < x1 && s.aabb[2] > x0 && s.aabb[1] < z1 && s.aabb[3] > z0);
   let x = item.x, z = item.z;
   for (let i = 0; i < steps; i++) {
     let nx = x + dx / steps, nz = z + dz / steps;
     for (let k = 0; k < 4; k++) {
-      const hit = deepest(item, nx, nz, shapes);
+      const hit = deepest(body, nx, nz, near);
       if (!hit) break;
       const push = hit.depth - TOUCH / 2;
       nx += hit.dir[0] * push; nz += hit.dir[1] * push;
     }
-    if (deepest(item, nx, nz, shapes)) break;
+    if (deepest(body, nx, nz, near)) break;
     x = nx; z = nz;
   }
   return { x, z };
@@ -248,9 +349,10 @@ export function slideTo(item, tx, tz, shapes) {
 // A piece set down by an agent a little into a wall or its trim (an outline's
 // edge is the wall's face, so a sofa placed there sinks into the baseboard) is
 // eased out, up to 3". Other pieces are left alone: chairs may tuck under tables.
-export function settleOffWalls(item, U) {
+export function settleOffWalls(item, U, assets = null) {
   if (!U || isFlat(item)) return null;
-  const shapes = collisionShapes(U).filter((s) => (s.kind === 'wall' || s.kind === 'trim') && s.y0 < item.h - 1e-3);
-  if (!collides(item, shapes)) return null;
-  return pushOut(item, shapes, 0.25);
+  const top = pieceBody(item, assets).y1 - 1e-3;
+  const shapes = collisionShapes(U).filter((s) => (s.kind === 'wall' || s.kind === 'trim') && s.y0 < top);
+  if (!collides(item, shapes, assets)) return null;
+  return pushOut(item, shapes, 0.25, assets);
 }

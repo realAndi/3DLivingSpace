@@ -29,7 +29,10 @@ who can look around and make their own version.
   recolor them. With *Pieces can't overlap* on (the default), a piece slides
   along and stops flush against walls, their trim (baseboards, door casings,
   window stools, at their real heights, so a coffee table slides under a sill
-  that stops a sofa), built-ins and other pieces. Fine-tune with the arrow keys
+  that stops a sofa), built-ins and other pieces. Pieces collide by their real
+  parts at their real heights (`src/hitbox.js`): chairs tuck under tables and
+  desks up to their backs, stools under an island's overhang, a lamp's shade
+  over a sofa arm, a side table into a sectional's corner. Fine-tune with the arrow keys
   (1", Alt ¼", Shift 1'), `[` `]` to turn 15° (Alt 1°), or the nudge pad on the
   piece's bar on a phone. A selected piece shows its clearance on each side.
 - **Tape measure** in every view: along the floor in Plan, between any two

@@ -10,7 +10,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { z } from 'zod';
 import { CATALOG, catalogByType, SWATCHES, isFlat } from '../src/catalog.js';
-import { cleanAsset, randomId, SHAPES, FINISHES, LIMITS } from '../src/design.js';
+import { cleanAsset, cleanItem, randomId, SHAPES, FINISHES, LIMITS } from '../src/design.js';
 import {
   ROOM_KINDS, FLOORS, OPENING_TYPES, FIXTURES, fixtureByType, SEGMENTS, FIXTURE_OPTIONS, FINISH_OPTIONS, UNIT_LIMITS,
   cleanUnit, buildUnit, fromInches, toInches, snapToWall,
@@ -31,7 +31,7 @@ Building a unit from a floor plan and photos:
 4. Call render_plan and compare it with the floor plan side by side. Fix positions and sizes with edit_unit, and fix every problem that build_unit, edit_unit and check_unit report.
 5. Set finishes from the photos: floors per room, wall paint, cabinets, counters, backsplash, appliances, hardware. Ask the person to look at it in 3D and tell you what is off.
 
-Furnishing: pick pieces from get_catalog and place them with place_items; for anything the catalog lacks, build it with create_asset and place it. Leave 30 to 36 in to walk, keep door swings clear, and check with check_unit and render_plan. find_spots suggests where a footprint fits.
+Furnishing: pick pieces from get_catalog and place them with place_items; for anything the catalog lacks, build it with create_asset and place it. Leave 30 to 36 in to walk, keep door swings clear, and check with check_unit and render_plan. find_spots suggests where a footprint fits. Pieces overlap only where their parts do, at the same height, so tuck them in the way real furniture goes: a dining chair's seat under the table up to its back (about 19 in for the catalog chair), a desk chair under the desk, stools under an island's overhang, a lamp's shade over a sofa's arm, a table in a sectional's open corner.
 
 Units are shared publicly by link: never put a street address, building name or unit number in any name.`;
 
@@ -235,9 +235,9 @@ export function createMcp(config, units, limiters) {
       at: [inch(it.x), inch(it.z)], width: inch(it.w), depth: inch(it.d), height: inch(it.h), rotation: it.rot,
       color: it.color ?? undefined, room: U.roomAt(it.x, it.z)?.id ?? null,
     });
-    const pieceProblems = (U, items, only = null) => items
+    const pieceProblems = (U, { items, assets }, only = null) => items
       .filter((it) => !only || only.includes(it.uid))
-      .map((it) => [it, problems(it, items, U)]).filter(([, list]) => list.length)
+      .map((it) => [it, problems(it, items, U, assets)]).filter(([, list]) => list.length)
       .map(([it, list]) => `${it.name} (${it.uid}) ${list.join(', ')}.`);
     function toItem(spec, base = {}) {
       const out = { ...base };
@@ -253,9 +253,11 @@ export function createMcp(config, units, limiters) {
       return out;
     }
 
-    // A piece set a little into a wall or its trim is eased out (src/fit.js).
+    // A piece set a little into a wall or its trim is eased out (src/fit.js),
+    // at its full size: the catalog's or the asset's where the agent gave none.
     function settle(U, doc, item, eased) {
-      const p = settleOffWalls(item, U);
+      const full = cleanItem(item, Object.fromEntries(doc.assets.map((a) => [a.id, a])));
+      const p = full && settleOffWalls(full, U, doc.assets);
       if (!p) return;
       eased.push({ id: item.uid, name: item.name ?? item.type, from: [inch(item.x), inch(item.z)], to: [inch(p.x), inch(p.z)] });
       item.x = Math.round(p.x * 1e4) / 1e4; item.z = Math.round(p.z * 1e4) / 1e4;
@@ -282,7 +284,7 @@ export function createMcp(config, units, limiters) {
         labels: spec.labels.map(toInches.label),
         furniture: items.map(itemOut(U)),
         assets: row.doc.assets.map(assetOut),
-        problems: [...U.problems, ...pieceProblems(U, items)],
+        problems: [...U.problems, ...pieceProblems(U, row.doc)],
       };
     }
     function openingOut(o, b) {
@@ -385,7 +387,7 @@ export function createMcp(config, units, limiters) {
         ...(report.not_found.length ? { not_found: report.not_found.map((x) => `Nothing has the id "${x}".`) } : {}),
         dropped: report.dropped,
         moved: report.moved,
-        problems: [...U.problems, ...pieceProblems(U, row.doc.items)],
+        problems: [...U.problems, ...pieceProblems(U, row.doc)],
         next: 'Call render_plan and compare it with the floor plan side by side. Fix positions and sizes with edit_unit, and fix every problem listed here.',
         view_url: viewUrl,
       };
@@ -496,7 +498,7 @@ Returns the same report as build_unit. Check the result with render_plan.`,
         return item.uid;
       }));
       const U = units.built(row);
-      return ok({ placed: row.doc.items.filter((i) => result.includes(i.uid)).map(itemOut(U)), ...(eased.length ? { eased_off_walls: eased } : {}), problems: pieceProblems(U, row.doc.items, result), view_url: viewUrl });
+      return ok({ placed: row.doc.items.filter((i) => result.includes(i.uid)).map(itemOut(U)), ...(eased.length ? { eased_off_walls: eased } : {}), problems: pieceProblems(U, row.doc, result), view_url: viewUrl });
     }));
 
     server.registerTool('update_items', {
@@ -522,7 +524,7 @@ Returns the same report as build_unit. Check the result with render_plan.`,
       });
       const U = units.built(row);
       const ids = items.map((s) => s.id);
-      return ok({ updated: row.doc.items.filter((i) => ids.includes(i.uid)).map(itemOut(U)), ...(eased.length ? { eased_off_walls: eased } : {}), problems: pieceProblems(U, row.doc.items, ids) });
+      return ok({ updated: row.doc.items.filter((i) => ids.includes(i.uid)).map(itemOut(U)), ...(eased.length ? { eased_off_walls: eased } : {}), problems: pieceProblems(U, row.doc, ids) });
     }));
 
     server.registerTool('remove_items', {
@@ -587,7 +589,7 @@ Parts are in inches in the piece's own frame: +x to the piece's right as you fac
     }, ({ width, depth, room, against_wall = true, count = 5 }) => run(() => {
       const { row, U } = current();
       if (room && !U.rooms.some((r) => r.id === room || r.name.toLowerCase() === room.toLowerCase())) throw new AppError(400, `There is no room "${room}". Rooms: ${U.rooms.map((r) => r.id).join(', ') || 'none yet'}.`);
-      const spots = findSpots({ w: ft(width), d: ft(depth), room, againstWall: against_wall, items: row.doc.items, count, U });
+      const spots = findSpots({ w: ft(width), d: ft(depth), room, againstWall: against_wall, items: row.doc.items, assets: row.doc.assets, count, U });
       return ok({
         spots: spots.map((s) => ({ at: [inch(s.x), inch(s.z)], rotation: s.rot, room: s.roomId })),
         ...(spots.length ? {} : { note: 'Nothing fits there. Try another room, a smaller size, against_wall: false, or move other pieces.' }),
@@ -605,7 +607,7 @@ Parts are in inches in the piece's own frame: +x to the piece's right as you fac
       const pieces = items.map((it) => ({
         id: it.uid, name: it.name, room: U.roomAt(it.x, it.z)?.id ?? null,
         clear_floor: isFlat(it) ? null : Object.fromEntries(clearances(it, items, U.obstacles).map((c) => [c.side, inch(c.dist)])),
-        problems: problems(it, items, U),
+        problems: problems(it, items, U, row.doc.assets),
       }));
       return ok({ unit_problems: U.problems, pieces, pieces_with_problems: pieces.filter((p) => p.problems.length).length });
     }));

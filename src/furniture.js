@@ -1,9 +1,12 @@
 import * as THREE from 'three';
 import { Batch, Frame } from './kit.js';
 import { catalogByType, SWATCHES } from './catalog.js';
+import { plantLeafY } from './hitbox.js';
 
 // 3D models for placed furniture: the catalog pieces, and custom assets built
-// from primitives (see src/design.js for their format).
+// from primitives (see src/design.js for their format). Pieces collide by the
+// parts in src/hitbox.js, which follow these builders: change both together,
+// and keep every piece inside its footprint (only a TV may overhang it).
 export { CATALOG, catalogByType, SWATCHES, isFlat, footprint, bounds, nearPiece } from './catalog.js';
 
 const colorCache = new Map();
@@ -69,7 +72,7 @@ const BUILDERS = {
     F.box(B, main, -w / 2, 0.3, 0.25, w / 2, 1.05, d);
     F.box(B, main, -w / 2, 0.3, 0, w / 2, h, 0.28);
     F.box(B, M.linen, -w / 2 + 0.1, 1.05, 0.3, w / 2 - 0.1, 1.9, d - 0.05);
-    F.box(B, M.duvet, -w / 2 + 0.02, 1.25, 1.75, w / 2 - 0.02, 1.98, d + 0.02);
+    F.box(B, M.duvet, -w / 2 + 0.02, 1.25, 1.75, w / 2 - 0.02, 1.98, d);
     F.box(B, M.cushion, -w / 2 + 0.12, 1.92, 1.75, w / 2 - 0.12, 2.0, Math.min(d - 0.3, 2.6));
     const n = w > 4 ? 2 : 1;
     for (let i = 0; i < n; i++) {
@@ -92,8 +95,9 @@ const BUILDERS = {
   },
   // L-shaped: a sofa along the back with a chaise on the right-hand end.
   sectional(B, M, F, w, d, h, m) {
-    const main = m ?? M.fabric, sd = 3.0, cw = 3.0;
+    const main = m ?? M.fabric, sd = Math.min(3.0, d), cw = Math.min(3.0, w);
     legs(B, M.black, F, w - 0.2, sd, 0.35, 0.2, 0.04);
+    if (d - sd > 0.5) for (const s of [w / 2 - cw + 0.3, w / 2 - 0.3]) { const [x, z] = F.p(s, d - 0.2); B.cyl(M.black, x, 0, z, 0.04, 0.35, 10); }
     F.box(B, main, -w / 2, 0.33, 0, w / 2, 1.3, sd);
     F.box(B, main, w / 2 - cw, 0.33, sd, w / 2, 1.3, d);
     F.box(B, main, -w / 2, 1.3, 0, w / 2, h, 0.75);
@@ -133,12 +137,12 @@ const BUILDERS = {
   },
   tvstand(B, M, F, w, d, h, m, item) {
     const main = m ?? M.walnut;
-    F.box(B, main, -w / 2, 0.4, 0, w / 2, h, d);
+    F.box(B, main, -w / 2, 0.4, 0, w / 2, h, d - 0.03);
     legs(B, M.black, F, w, d, 0.4, 0.1, 0.035);
     const n = w > 4 ? 3 : 2;
     for (let k = 0; k < n; k++) {
       const s0 = -w / 2 + (k * w) / n;
-      F.box(B, main, s0 + 0.03, 0.45, d, s0 + w / n - 0.03, h - 0.05, d + 0.03);
+      F.box(B, main, s0 + 0.03, 0.45, d - 0.03, s0 + w / n - 0.03, h - 0.05, d);
     }
     if (item.tv) {
       const tw = 4.03, y = h;
@@ -191,20 +195,20 @@ const BUILDERS = {
   },
   nightstand(B, M, F, w, d, h, m) {
     const main = m ?? M.walnut;
-    F.box(B, main, -w / 2, 0.25, 0, w / 2, h, d);
+    F.box(B, main, -w / 2, 0.25, 0, w / 2, h, d - 0.03);
     legs(B, M.black, F, w, d, 0.25, 0.08, 0.03);
-    F.box(B, M.black, -0.25, h - 0.45, d, 0.25, h - 0.42, d + 0.03);
+    F.box(B, M.black, -0.25, h - 0.45, d - 0.03, 0.25, h - 0.42, d);
   },
   dresser(B, M, F, w, d, h, m) {
     const main = m ?? M.walnut;
-    F.box(B, main, -w / 2, 0.3, 0, w / 2, h, d);
+    F.box(B, main, -w / 2, 0.3, 0, w / 2, h, d - 0.06);
     legs(B, M.black, F, w, d, 0.3, 0.1, 0.035);
     const rows = Math.max(2, Math.round((h - 0.38) / 0.8)), rh = (h - 0.38) / rows;
     const cols = w > 3.5 ? 2 : 1;
     for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
       const y0 = 0.36 + r * rh, s0 = -w / 2 + (c * w) / cols, s1 = s0 + w / cols, sc = (s0 + s1) / 2;
-      F.box(B, main, s0 + 0.03, y0, d, s1 - 0.03, y0 + rh - 0.05, d + 0.03);
-      F.box(B, M.black, sc - 0.2, y0 + rh - 0.2, d + 0.03, sc + 0.2, y0 + rh - 0.17, d + 0.06);
+      F.box(B, main, s0 + 0.03, y0, d - 0.06, s1 - 0.03, y0 + rh - 0.05, d - 0.03);
+      F.box(B, M.black, sc - 0.2, y0 + rh - 0.2, d - 0.03, sc + 0.2, y0 + rh - 0.17, d);
     }
   },
   desk(B, M, F, w, d, h, m) {
@@ -228,9 +232,9 @@ const BUILDERS = {
     const [x, z] = F.p(0, d / 2), r = Math.min(w, d) / 2;
     B.cyl(m ?? M.pot, x, 0, z, r * 0.7, Math.min(1.3, h * 0.35), 24, r * 0.85);
     for (let k = 0; k < 4; k++) {
-      const leaf = new THREE.IcosahedronGeometry(r * (0.85 - k * 0.1), 1);
+      const rk = r * (0.85 - k * 0.1), leaf = new THREE.IcosahedronGeometry(rk, 1);
       const a = k * 2.1;
-      leaf.translate(x + Math.cos(a) * r * 0.25, h * (0.55 + k * 0.12), z + Math.sin(a) * r * 0.25);
+      leaf.translate(x + Math.cos(a) * r * 0.15, plantLeafY(h, k, rk), z + Math.sin(a) * r * 0.15);
       B.add(leaf, M.plant);
     }
   },

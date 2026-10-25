@@ -204,7 +204,7 @@ export class LayoutEditor {
     const [ax, az] = this.#screenAxis(dir === 'left' || dir === 'right' ? 'right' : 'up');
     const sgn = dir === 'left' || dir === 'down' ? -1 : 1;
     let x = item.x + ax * sgn * step, z = item.z + az * sgn * step;
-    if (this.collide) ({ x, z } = slideTo(item, x, z, this.#blockers(item)));
+    if (this.collide) ({ x, z } = slideTo(item, x, z, this.#blockers(item), this.assets));
     if (Math.hypot(x - item.x, z - item.z) < 1e-5) { this.#stopped(); return; }
     this.update(item.uid, { x: Math.round(x * 1e4) / 1e4, z: Math.round(z * 1e4) / 1e4 }, { rebuild: false });
   }
@@ -334,10 +334,10 @@ export class LayoutEditor {
   }
 
   // ---------------------------------------------------------------- placing
-  #blockers(item) { return this.U ? blockersFor(item, this.U, this.items) : []; }
+  #blockers(item) { return this.U ? blockersFor(item, this.U, this.items, this.assets) : []; }
 
   #overlaps(item) {
-    return collides(item, this.#blockers(item));
+    return collides(item, this.#blockers(item), this.assets);
   }
 
   // A change to a piece's turn or size: as is when it fits (or collisions are
@@ -345,12 +345,12 @@ export class LayoutEditor {
   // or null with a note when there's no room.
   #fitChange(item, patch, what) {
     if (!this.collide || !this.U) return patch;
-    if (collides(item, this.#blockers(item))) return patch;
+    if (collides(item, this.#blockers(item), this.assets)) return patch;
     const test = { ...item, ...patch };
     const shapes = this.#blockers(test);
-    if (!collides(test, shapes)) return patch;
+    if (!collides(test, shapes, this.assets)) return patch;
     // Far enough to turn a long piece around beside a wall: half its length.
-    const p = pushOut(test, shapes, Math.max(0.75, Math.max(test.w, test.d) / 2 + 0.25));
+    const p = pushOut(test, shapes, Math.max(0.75, Math.max(test.w, test.d) / 2 + 0.25), this.assets);
     if (p) return { ...patch, x: Math.round(p.x * 1e4) / 1e4, z: Math.round(p.z * 1e4) / 1e4 };
     this.toast(`No room to ${what} here. Move it into the open first, or turn off "Pieces can't overlap".`);
     return null;
@@ -472,14 +472,14 @@ export class LayoutEditor {
       const grid = e.altKey ? 1 / 48 : 1 / 12;
       const tx = snap(p.x + drag.ox, grid), tz = snap(p.z + drag.oz, grid);
       let next;
-      if (drag.blockers) next = { ...item, ...slideTo(item, tx, tz, drag.blockers) };
+      if (drag.blockers) next = { ...item, ...slideTo(item, tx, tz, drag.blockers, this.assets) };
       else {
         next = { ...item, x: tx, z: tz };
         if (!this.insideUnit(next.x, next.z)) return;
       }
       const before = { x: next.x, z: next.z };
       this.#snapToWalls(next);
-      if (drag.blockers && collides(next, drag.blockers)) Object.assign(next, before);
+      if (drag.blockers && collides(next, drag.blockers, this.assets)) Object.assign(next, before);
       item.x = next.x; item.z = next.z;
       this.groups.get(item.uid).position.set(item.x, 0, item.z);
       this.#updateGuides();
@@ -668,7 +668,7 @@ export class LayoutEditor {
   #problems(item) {
     if (!this.U || this.U.empty) return [];
     // Overlaps name the other piece's id for agents; people only need its name.
-    return problems(item, this.items, this.U).map((t) => t.replace(/ \([A-Za-z0-9_-]+\)$/, ''));
+    return problems(item, this.items, this.U, this.assets).map((t) => t.replace(/ \([A-Za-z0-9_-]+\)$/, ''));
   }
 
   #renderBar() {
