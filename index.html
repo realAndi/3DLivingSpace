@@ -57,6 +57,14 @@
 
 * { box-sizing: border-box; }
 html, body { height: 100%; margin: 0; }
+/* An app surface, not a document: no text selection, long-press callouts or
+   tap flashes anywhere (on phones they hijack drags, swipes and pinches).
+   Fields stay selectable so links can be copied by hand. Overlays on the 3D
+   view pass double-taps through instead of zooming the page. */
+html { -webkit-tap-highlight-color: transparent; }
+body { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+input, textarea, [contenteditable] { -webkit-user-select: text; user-select: text; -webkit-touch-callout: default; }
+.stage, .stage button, .panel button { touch-action: manipulation; }
 body {
   background: var(--bg); color: var(--ink);
   font: 400 15px/1.45 var(--font-ui);
