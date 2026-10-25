@@ -1,13 +1,16 @@
 import * as THREE from 'three';
-import { WALLS } from './plan.js';
+import { fmtLen } from './units.js';
 
 // A tape measure that works in every view. In Plan it measures along the floor
 // and snaps to wall faces; in Dollhouse and Walk it measures between any two
 // surface points (floor, walls, counters, furniture), so heights work too.
-// Nearly level, plumb or square lines snap straight.
+// Nearly level, plumb or square lines snap straight. Wall faces come from the
+// built unit `U` (setUnit swaps it when the unit is rebuilt); `floors()` is the
+// floor mesh group Plan measures on.
 export class TapeMeasure {
   constructor(opts) {
     Object.assign(this, opts);
+    this.U = opts.U ?? null;
     this.active = false;
     this.start = null;
     this.preview = null;
@@ -38,6 +41,13 @@ export class TapeMeasure {
 
   get count() { return this.items.length; }
 
+  setUnit(U) { this.U = U; }
+
+  // The display units changed.
+  refreshLabels() {
+    for (const m of [...this.items, ...(this.preview ? [this.preview] : [])]) this.#label(m.el, m.a, m.b);
+  }
+
   // ------------------------------------------------------------ picking
   #aim(e) {
     const r = this.canvas.getBoundingClientRect();
@@ -47,7 +57,8 @@ export class TapeMeasure {
   #point(e) {
     this.#aim(e);
     if (this.getMode() === 'plan') {
-      const h = this.ray.intersectObject(this.floors, true)[0];
+      const floors = this.floors();
+      const h = floors ? this.ray.intersectObject(floors, true)[0] : null;
       return h ? this.#snap(new THREE.Vector3(h.point.x, 0.06, h.point.z), true) : null;
     }
     const h = this.ray.intersectObjects(this.targets(), true)[0];
@@ -59,9 +70,9 @@ export class TapeMeasure {
 
   #snap(p, flat) {
     const s = 0.3;
-    for (const w of WALLS) {
-      if (p.z > w.z0 - 0.1 && p.z < w.z1 + 0.1) { if (Math.abs(p.x - w.x0) < s) p.x = w.x0; else if (Math.abs(p.x - w.x1) < s) p.x = w.x1; }
-      if (p.x > w.x0 - 0.1 && p.x < w.x1 + 0.1) { if (Math.abs(p.z - w.z0) < s) p.z = w.z0; else if (Math.abs(p.z - w.z1) < s) p.z = w.z1; }
+    for (const [x0, z0, x1, z1] of this.U?.wallRects ?? []) {
+      if (p.z > z0 - 0.1 && p.z < z1 + 0.1) { if (Math.abs(p.x - x0) < s) p.x = x0; else if (Math.abs(p.x - x1) < s) p.x = x1; }
+      if (p.x > x0 - 0.1 && p.x < x1 + 0.1) { if (Math.abs(p.z - z0) < s) p.z = z0; else if (Math.abs(p.z - z1) < s) p.z = z1; }
     }
     if (!flat && p.y < 0.12) p.y = 0.02;
     const a = this.start;
@@ -137,15 +148,20 @@ export class TapeMeasure {
     this.scene.add(group);
     const el = document.createElement('div');
     el.className = `measure-label${isPreview ? ' preview' : ''}`;
-    const rise = Math.abs(b.y - a.y), run = Math.hypot(b.x - a.x, b.z - a.z);
-    el.textContent = this.fmt(len);
-    if (rise > 0.08 && run > 0.08) {
-      const sub = document.createElement('small');
-      sub.textContent = `↕ ${this.fmt(rise)} · ↔ ${this.fmt(run)}`;
-      el.append(sub);
-    }
+    this.#label(el, a, b);
     this.layer.append(el);
     return { group, el, a: a.clone(), b: b.clone(), len };
+  }
+
+  // The length, plus rise and run when the line slopes.
+  #label(el, a, b) {
+    const rise = Math.abs(b.y - a.y), run = Math.hypot(b.x - a.x, b.z - a.z);
+    el.textContent = fmtLen(a.distanceTo(b));
+    if (rise > 0.08 && run > 0.08) {
+      const sub = document.createElement('small');
+      sub.textContent = `↕ ${fmtLen(rise)} · ↔ ${fmtLen(run)}`;
+      el.append(sub);
+    }
   }
 
   #dispose(m) {

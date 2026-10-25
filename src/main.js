@@ -3,27 +3,48 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { createMaterials } from './materials.js';
 import { buildArchitecture } from './architecture.js';
-import { buildKitchen } from './kitchen.js';
-import { buildBaths } from './baths.js';
+import { buildFixtures } from './fixtures.js';
 import { LayoutEditor } from './layout.js';
 import { TapeMeasure } from './measure.js';
-import { DesignSession } from './sync.js';
+import { UnitSession } from './sync.js';
 import { buildSurroundings } from './surroundings.js';
 import { WalkControls } from './walk.js';
-import { ROOMS, ZONES, PLAN_IMAGE, HEIGHT, UNIT, ROOM_VIEWS, X, Z } from './plan.js';
-import { polygonArea, wallPieces, inRect, insideUnit, OBSTACLES } from './space.js';
+import { buildUnit, cleanUnit, emptyUnit } from './unit.js';
+import { pointInPoly, distToSegment, parseFeetInches } from './geometry.js';
+import * as units from './units.js';
+import { fmtLen, fmtDims, fmtArea } from './units.js';
+
+// The app: one unit on screen, built from its spec (src/unit.js), in three
+// views (Dollhouse, Plan, Walk), with the furniture planner, the tape measure
+// and the panel around it. The unit is rebuilt whenever it changes on the
+// server, so Claude building it through MCP shows up live.
 
 const DEG = Math.PI / 180;
+const EYE = 5.2;
+// The example unit's size. The camera numbers below were tuned on it; other
+// units scale them by how much bigger or smaller they are.
+const REF = { long: 37.33, short: 25.46 };
 const $ = (s) => document.querySelector(s);
+const $$ = (s) => [...document.querySelectorAll(s)];
 const stage = $('#stage'), canvas = $('#scene'), panel = $('#panel');
 const coarse = matchMedia('(pointer: coarse)').matches;
-const narrow = () => matchMedia('(max-width: 899px)').matches;
+// Phones held upright and narrow windows: the panel is a bottom sheet. Phones
+// held sideways keep a slim side panel, since a sheet would cover the view.
+const sheetMQ = matchMedia('(max-width: 899px) and (orientation: portrait), (max-width: 899px) and (min-height: 560px)');
+const narrow = () => sheetMQ.matches;
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const make = (tag, cls, text) => {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text != null) e.textContent = text;
+  return e;
+};
 
 let needsRender = true;
 function invalidate() { needsRender = true; }
 
 function fail(message) {
+  $('#loading').classList.remove('done');
   $('#loading').innerHTML = `<div class="error">${message}</div>`;
 }
 
@@ -48,58 +69,79 @@ const pmrem = new THREE.PMREMGenerator(renderer);
 scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
 
 const M = createMaterials(renderer);
-const arch = buildArchitecture(M);
-const kitchen = buildKitchen(M);
-const baths = buildBaths(M);
+
+// The unit on screen: its built data U, and the meshes made from it. All of it
+// is replaced when the unit changes (see showUnit).
+let U = buildUnit(emptyUnit(), { checks: false });
+let arch = null, fixtures = null, city = null, doors = [];
+let shownSpec = null;
+const built = new THREE.Group();
+built.name = 'unit';
 // Pieces placed with the furniture planner (src/layout.js) live in this group.
 const furniture = new THREE.Group();
 furniture.name = 'furniture';
-const city = buildSurroundings();
-const doors = arch.doors;
-doors.forEach((d) => { d.openTo = d.angle > 10 ? d.angle : d.id === 'wic' ? 80 : 90; });
+scene.add(built, furniture);
 
-const unit = new THREE.Group();
-arch.ceilings.add(kitchen.soffit);
-unit.add(arch.walls, arch.cutCaps, arch.tops, arch.floors, arch.ceilings, arch.trim, kitchen.solid, baths.solid, furniture, arch.glass, baths.glass);
-doors.forEach((d) => unit.add(d.pivot));
-scene.add(unit, city);
+const CENTER = new THREE.Vector3(15, 0, 10);
+let SIZE = { w: 30, d: 20, k: 1 };
 
-const fp = UNIT.footprint;
-const CENTER = new THREE.Vector3((fp.x0 + fp.x1) / 2, 0, (fp.z0 + fp.z1) / 2);
+// An empty unit shows a faint grid of feet, a plot waiting to be built on.
+const plot = new THREE.GridHelper(30, 30, 0xffffff, 0xffffff);
+plot.material.transparent = true;
+plot.material.opacity = 0.5;
+plot.material.depthWrite = false;
+plot.visible = false;
+scene.add(plot);
 
 // Lights
 const hemi = new THREE.HemisphereLight(0xf5f7fa, 0xcdbfae, 1.3);
 const sun = new THREE.DirectionalLight(0xfff0dc, 2.4);
 sun.castShadow = true;
 sun.shadow.mapSize.set(coarse ? 1536 : 2048, coarse ? 1536 : 2048);
-Object.assign(sun.shadow.camera, { left: -27, right: 27, top: 27, bottom: -27, near: 1, far: 220 });
 sun.shadow.bias = -0.0004;
 sun.shadow.normalBias = 0.035;
-sun.target.position.copy(CENTER);
 scene.add(hemi, sun, sun.target);
+let sunDist = 90;
 const LIGHTING = {
   dollhouse: { az: 155, el: 58, sun: 2.3, hemi: 1.35, env: 0.45 },
   plan: { az: 200, el: 72, sun: 1.7, hemi: 1.6, env: 0.4 },
   walk: { az: 105, el: 24, sun: 3.2, hemi: 1.25, env: 0.6 },
 };
 function setLighting(m) {
-  const L = LIGHTING[m], r = 90;
+  const L = LIGHTING[m], r = sunDist;
+  sun.target.position.copy(CENTER);
   sun.position.set(CENTER.x + Math.sin(L.az * DEG) * Math.cos(L.el * DEG) * r, Math.sin(L.el * DEG) * r, CENTER.z - Math.cos(L.az * DEG) * Math.cos(L.el * DEG) * r);
   sun.intensity = L.sun; hemi.intensity = L.hemi; scene.environmentIntensity = L.env;
 }
 
-// Leasing plan overlay (plan view).
-const planTex = new THREE.TextureLoader().load(PLAN_IMAGE.src, () => invalidate());
-planTex.colorSpace = THREE.SRGBColorSpace;
-planTex.anisotropy = 4;
-const planOverlay = new THREE.Mesh(
-  new THREE.PlaneGeometry(PLAN_IMAGE.w / PLAN_IMAGE.pxPerFt, PLAN_IMAGE.h / PLAN_IMAGE.pxPerFt).rotateX(-Math.PI / 2),
-  new THREE.MeshBasicMaterial({ map: planTex, transparent: true, opacity: 0.6, depthTest: false, toneMapped: false }),
-);
-planOverlay.position.set(X(PLAN_IMAGE.w / 2), HEIGHT.ceiling + 0.2, Z(PLAN_IMAGE.h / 2));
-planOverlay.renderOrder = 10;
-planOverlay.visible = false;
-scene.add(planOverlay);
+// The floor plan picture under the tracing (only the example has one).
+let planOverlay = null;
+const planTextures = new Map();
+function buildPlanOverlay() {
+  if (planOverlay) {
+    scene.remove(planOverlay);
+    planOverlay.geometry.dispose();
+    planOverlay.material.dispose();
+    planOverlay = null;
+  }
+  const pi = U.planImage;
+  $('#overlayToggle').hidden = !pi;
+  if (!pi) { $('#optOverlay').checked = false; return; }
+  if (!planTextures.has(pi.src)) {
+    const tex = new THREE.TextureLoader().load(pi.src, () => invalidate());
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.anisotropy = 4;
+    planTextures.set(pi.src, tex);
+  }
+  planOverlay = new THREE.Mesh(
+    new THREE.PlaneGeometry(pi.w, pi.h).rotateX(-Math.PI / 2),
+    new THREE.MeshBasicMaterial({ map: planTextures.get(pi.src), transparent: true, opacity: 0.6, depthTest: false, toneMapped: false }),
+  );
+  planOverlay.position.set(pi.x + pi.w / 2, U.heights.ceiling + 0.2, pi.z + pi.h / 2);
+  planOverlay.renderOrder = 10;
+  planOverlay.visible = mode === 'plan' && $('#optOverlay').checked;
+  scene.add(planOverlay);
+}
 
 // ---------------------------------------------------------------------------
 // Cameras and controls
@@ -122,13 +164,37 @@ plan.target.copy(CENTER);
 
 for (const c of [doll, plan]) c.addEventListener('change', () => invalidate());
 
+// Framing follows the unit's size: where it sits, how far the cameras stand
+// back, how far Plan zooms in, and the shadow camera.
+function measureUnit() {
+  const b = U.bounds;
+  CENTER.set((b.x0 + b.x1) / 2, 0, (b.z0 + b.z1) / 2);
+  const w = b.x1 - b.x0, d = b.z1 - b.z0;
+  SIZE = { w, d, k: Math.max(Math.max(w, d) / REF.long, Math.min(w, d) / REF.short) };
+  const R = Math.hypot(w, d) / 2 + 4.4;
+  Object.assign(sun.shadow.camera, { left: -R, right: R, top: R, bottom: -R, near: 1, far: Math.max(220, R * 8) });
+  sun.shadow.camera.updateProjectionMatrix();
+  sunDist = Math.max(90, R * 3.3);
+  doll.maxDistance = 160 * Math.max(1, SIZE.k);
+  plan.maxZoom = clamp(9 * SIZE.k, 4, 40);
+  planCam.far = Math.max(400, 200 + R * 2);
+  planCam.updateProjectionMatrix();
+}
+
 // ---------------------------------------------------------------------------
 // Walking: collisions against walls (minus doorways), built-ins, furniture and shut doors.
+const inRect = (x, z, [x0, z0, x1, z1], r = 0) => x > x0 - r && x < x1 + r && z > z0 - r && z < z1 + r;
+function nearPoly(x, z, poly, r) {
+  if (!poly?.length) return false;
+  if (pointInPoly(x, z, poly)) return true;
+  for (let i = 0; i < poly.length; i++) if (distToSegment(x, z, poly[i], poly[(i + 1) % poly.length]) < r) return true;
+  return false;
+}
 function isBlocked(x, z, r) {
-  if (!insideUnit(x, z)) return true;
-  if (OBSTACLES.some((b) => inRect(x, z, b, r))) return true;
+  if (!U.insideUnit(x, z)) return true;
+  if (U.obstacles.some((b) => inRect(x, z, b, r))) return true;
   if (furniture.visible && layout.blocks(x, z, r * 0.6)) return true;
-  return doors.some((d) => d.angle < 20 && inRect(x, z, d.closedRect, r));
+  return doors.some((d) => d.angle < 20 && nearPoly(x, z, d.closedPoly, r));
 }
 
 const ray = new THREE.Raycaster();
@@ -138,7 +204,7 @@ function aim(clientX, clientY, cam) {
   ndc.set(((clientX - r.left) / r.width) * 2 - 1, -((clientY - r.top) / r.height) * 2 + 1);
   ray.setFromCamera(ndc, cam);
 }
-const pickables = () => [arch.walls, arch.floors, arch.trim, kitchen.solid, baths.solid, furniture.visible ? furniture : null, ...doors.map((d) => d.pivot)].filter(Boolean);
+const pickables = () => [arch?.walls, arch?.floors, arch?.trim, fixtures?.solid, furniture.visible ? furniture : null, ...doors.map((d) => d.pivot)].filter(Boolean);
 
 function pickWalk(cx, cy) {
   if (tape.active) return null;
@@ -159,10 +225,17 @@ const walk = new WalkControls(walkCam, canvas, {
   pick: pickWalk,
   onTapDoor: (id) => toggleDoor(id),
   onUserMove: () => { dismissHint(); invalidate(); },
+  // A click while measuring places a point instead of grabbing the mouse.
+  canLock: () => !tape.active && !layout.dragging,
+  onLockChange: (locked) => { if (locked) dismissHint(); else if (mode === 'walk') showHint(); invalidate(); },
 });
 walk.attachJoystick($('#joystick'), $('#joystick .knob'));
-const ENTRY_POSE = { x: X(285), y: HEIGHT.eye, z: Z(450), yaw: 90, pitch: -4 };
-walk.setPose(ENTRY_POSE);
+// Where Walk starts: the unit's start, the living room's view, or the middle.
+function startPose() {
+  const v = U.start ?? Object.values(U.views)[0] ?? { x: CENTER.x, z: CENTER.z, yaw: 0 };
+  return { x: v.x, y: EYE, z: v.z, yaw: v.yaw, pitch: -4 };
+}
+walk.setPose(startPose());
 
 // ---------------------------------------------------------------------------
 // Doors
@@ -195,6 +268,7 @@ const highlightFill = new THREE.MeshBasicMaterial({ transparent: true, opacity: 
 function readTheme() {
   colors = { bg: token('--bg'), ink: token('--ink'), ink2: token('--ink-2'), surface: token('--surface'), surface2: token('--surface-2'), rule: token('--rule'), oak: token('--oak') };
   bgColor.set(colors.bg);
+  plot.material.color.set(colors.rule);
   accentMat.color.set(colors.oak);
   highlightFill.color.set(colors.oak);
   invalidate();
@@ -203,26 +277,38 @@ matchMedia('(prefers-color-scheme: dark)').addEventListener('change', readTheme)
 readTheme();
 
 // ---------------------------------------------------------------------------
-// Rooms: list, labels, focus
-const fmt = (ft) => { const t = Math.round(ft * 12); return `${Math.floor(t / 12)}'${t % 12}"`; };
-const ROOM_ORDER = ['living', 'primary', 'bed2', 'bath1', 'bath2', 'hall', 'wic', 'laundry', 'closet2', 'coat'];
-const MINOR = new Set(['wic', 'laundry', 'closet2', 'coat']);
-const roomInfo = Object.fromEntries(ROOMS.map((r) => {
-  const xs = r.poly.map((p) => p[0]), zs = r.poly.map((p) => p[1]);
-  const w = Math.max(...xs) - Math.min(...xs), d = Math.max(...zs) - Math.min(...zs);
-  const area = Math.abs(polygonArea(r.poly));
-  const dims = r.dims ?? (r.poly.length === 4 ? `${fmt(Math.min(w, d))} × ${fmt(Math.max(w, d))}` : `${Math.round(area)} sq ft`);
-  return [r.id, { room: r, w, d, area, dims, fromPlan: !!r.dims, center: [(Math.max(...xs) + Math.min(...xs)) / 2, (Math.max(...zs) + Math.min(...zs)) / 2] }];
-}));
+// Rooms: list, labels, focus. Sizes go through the display units (src/units.js).
+
+// A room's size: as printed on the plan when the plan prints one, else the
+// clear floor inside its walls (overall, for rooms that aren't rectangles).
+function roomSize(r) {
+  if (r.planSize) {
+    if (units.getUnits() === 'ftin') return { text: r.planSize, plan: true };
+    const parts = r.planSize.split(/\s*[x×X]\s*/).map(parseFeetInches);
+    return { text: parts.length === 2 && parts.every((v) => v !== null) ? fmtDims(...parts) : r.planSize, plan: true };
+  }
+  const [a, b] = [r.w, r.d].sort((p, q) => p - q);
+  return { text: `${fmtDims(a, b)}${r.rect ? '' : ' overall'}`, plan: false };
+}
 
 const roomList = $('#roomList');
-for (const id of ROOM_ORDER) {
-  const info = roomInfo[id];
-  const li = document.createElement('li');
-  li.innerHTML = `<button class="room-btn" data-room="${id}">
-    <span class="room-name">${info.room.name}</span><span class="room-area">${Math.round(info.area)} sq ft</span>
-    <span class="room-dims">${info.dims}</span>${info.fromPlan ? '<span class="src">Plan</span>' : ''}</button>`;
-  roomList.append(li);
+function renderRooms() {
+  roomList.textContent = '';
+  for (const r of U.rooms) {
+    const size = roomSize(r);
+    const b = make('button', 'room-btn');
+    b.dataset.room = r.id;
+    b.append(make('span', 'room-name', r.name), make('span', 'room-area', fmtArea(r.area)), make('span', 'room-dims', size.text));
+    if (size.plan) b.append(make('span', 'src', 'Plan'));
+    const li = make('li');
+    li.append(b);
+    roomList.append(li);
+  }
+  const fromPlan = U.rooms.some((r) => r.planSize);
+  $('#roomsNote').hidden = U.empty;
+  $('#roomsNote').innerHTML = fromPlan
+    ? 'Sizes marked <b>Plan</b> are printed on the floor plan. The rest are measured inside the walls, face to face.'
+    : 'Sizes are measured inside the walls, face to face.';
 }
 roomList.addEventListener('click', (e) => {
   const b = e.target.closest('[data-room]');
@@ -230,22 +316,26 @@ roomList.addEventListener('click', (e) => {
 });
 
 const labelLayer = $('#labels');
-const labels = [];
-for (const id of ROOM_ORDER) {
-  const info = roomInfo[id];
-  const el = document.createElement('div');
-  el.className = `room-label${MINOR.has(id) ? ' minor' : ''}`;
-  el.innerHTML = MINOR.has(id) ? `<b>${info.room.name}</b>` : `<b>${info.room.name}</b><span>${info.dims}</span>`;
-  labelLayer.append(el);
-  labels.push({ el, x: info.room.at[0], z: info.room.at[1], minor: MINOR.has(id) });
+let labels = [];
+function renderLabels() {
+  labelLayer.textContent = '';
+  labels = [];
+  for (const r of U.rooms) {
+    const el = make('div', `room-label${r.minor ? ' minor' : ''}`);
+    el.append(make('b', null, r.name));
+    // Rooms that aren't rectangles show their area, as one size can't describe them.
+    if (!r.minor) el.append(make('span', null, r.rect || r.planSize ? roomSize(r).text : fmtArea(r.area)));
+    labelLayer.append(el);
+    labels.push({ el, x: r.at[0], z: r.at[1], minor: r.minor });
+  }
+  for (const l of U.labels) {
+    const el = make('div', 'room-label zone');
+    el.append(make('b', null, l.text));
+    labelLayer.append(el);
+    labels.push({ el, x: l.at[0], z: l.at[1], minor: false, zone: true });
+  }
 }
-for (const zn of ZONES) {
-  const el = document.createElement('div');
-  el.className = 'room-label zone';
-  el.innerHTML = `<b>${zn.name}</b>`;
-  labelLayer.append(el);
-  labels.push({ el, x: zn.at[0], z: zn.at[1], minor: false, zone: true });
-}
+
 let showLabels = true;
 const v3 = new THREE.Vector3();
 function project(x, y, z, cam) {
@@ -265,7 +355,7 @@ function updateLabels() {
     l.el.hidden = !show;
     if (!show) continue;
     // Dollhouse labels float at wall-top height so walls never hide them.
-    const p = project(l.x, mode === 'dollhouse' ? HEIGHT.ceiling + 0.4 : 0.2, l.z, cam);
+    const p = project(l.x, mode === 'dollhouse' ? U.heights.ceiling + 0.4 : 0.2, l.z, cam);
     l.el.hidden = p.behind;
     l.el.style.transform = `translate(${p.x}px, ${p.y}px) translate(-50%, -50%)`;
   }
@@ -274,19 +364,25 @@ function updateLabels() {
 // Room highlight
 let highlight = null;
 function highlightRoom(r) {
-  if (highlight) scene.remove(highlight.mesh);
+  clearHighlight();
   const shape = new THREE.Shape(r.poly.map(([x, z]) => new THREE.Vector2(x, -z)));
   const mesh = new THREE.Mesh(new THREE.ShapeGeometry(shape).rotateX(-Math.PI / 2).translate(0, 0.05, 0), highlightFill);
   mesh.renderOrder = 5;
   scene.add(mesh);
   highlight = { mesh, t: 0 };
 }
+function clearHighlight() {
+  if (!highlight) return;
+  scene.remove(highlight.mesh);
+  highlight.mesh.geometry.dispose();
+  highlight = null;
+}
 function stepHighlight(dt) {
   if (!highlight) return false;
   highlight.t += dt;
   const t = highlight.t;
   highlightFill.opacity = t < 0.3 ? (t / 0.3) * 0.35 : Math.max(0, 0.35 * (1 - (t - 1.6) / 1.0));
-  if (t > 2.6) { scene.remove(highlight.mesh); highlight.mesh.geometry.dispose(); highlight = null; }
+  if (t > 2.6) clearHighlight();
   return true;
 }
 
@@ -310,23 +406,24 @@ function stepOrbitTween(dt) {
 }
 
 function focusRoom(id) {
-  const info = roomInfo[id];
+  const r = U.roomById[id];
+  if (!r) return;
   roomList.querySelectorAll('[data-room]').forEach((b) => b.setAttribute('aria-current', String(b.dataset.room === id)));
-  const [cx, cz] = info.center;
+  const cx = (r.bbox[0] + r.bbox[2]) / 2, cz = (r.bbox[1] + r.bbox[3]) / 2;
   const target = new THREE.Vector3(cx, 0, cz);
   if (mode === 'walk') {
-    const v = ROOM_VIEWS[id];
-    walk.setPose({ x: X(v.at[0]), y: HEIGHT.eye, z: Z(v.at[1]), yaw: v.yaw, pitch: -4 }, { animate: true, duration: 1.1 });
+    const v = U.views[id] ?? { x: r.at[0], z: r.at[1], yaw: walk.yaw };
+    walk.setPose({ x: v.x, y: EYE, z: v.z, yaw: v.yaw, pitch: -4 }, { animate: true, duration: 1.1 });
   } else if (mode === 'plan') {
     const viewH = planCam.top - planCam.bottom;
-    const zoom = clamp(viewH / (Math.max(info.w, info.d) * 2.4), 1, 5);
+    const zoom = clamp(viewH / (Math.max(r.w, r.d) * 2.4), 1, Math.min(5, plan.maxZoom));
     tweenOrbit(plan, planCam, target, new THREE.Vector3(cx, planCam.position.y, cz), zoom);
-    highlightRoom(info.room);
+    highlightRoom(r);
   } else {
     const dir = dollCam.position.clone().sub(doll.target).normalize();
-    const dist = clamp(Math.max(info.w, info.d) * 2.2 + 10, 16, 70);
+    const dist = clamp(Math.max(r.w, r.d) * 2.2 + 10, 16, 70);
     tweenOrbit(doll, dollCam, target, target.clone().add(dir.multiplyScalar(dist)));
-    highlightRoom(info.room);
+    highlightRoom(r);
   }
   if (narrow()) setSheet(false);
 }
@@ -334,11 +431,10 @@ function focusRoom(id) {
 // ---------------------------------------------------------------------------
 // Furniture planner
 const layout = new LayoutEditor({
-  M, scene, root: furniture, canvas, stage, accentMat, fmt, insideUnit, invalidate,
+  M, scene, root: furniture, canvas, stage, accentMat, invalidate, U,
   getCamera: () => activeCam(),
   getMode: () => mode,
-  obstacles: () => OBSTACLES,
-  occluders: () => [arch.walls, kitchen.solid, baths.solid, ...doors.map((d) => d.pivot)],
+  occluders: () => [arch?.walls, fixtures?.solid, ...doors.map((d) => d.pivot)].filter(Boolean),
   onSelect: (id) => { stage.classList.toggle('piece-active', id != null); if (id != null) dismissHint(); },
   onOps: (ops) => session.queue(ops),
   onAdded: () => { if (narrow()) setSheet(false); },
@@ -362,11 +458,12 @@ const tapeLayer = document.createElement('div');
 tapeLayer.className = 'edit-layer';
 stage.append(tapeLayer);
 const tape = new TapeMeasure({
-  scene, canvas, stage, layer: tapeLayer, fmt, invalidate,
-  material: accentMat, floors: arch.floors,
+  scene, canvas, stage, layer: tapeLayer, invalidate, U,
+  material: accentMat,
+  floors: () => arch?.floors ?? null,
   getCamera: () => activeCam(),
   getMode: () => mode,
-  targets: () => [arch.walls, arch.floors, arch.trim, kitchen.solid, baths.solid, furniture.visible ? furniture : null, ...doors.map((d) => d.pivot)].filter(Boolean),
+  targets: () => pickables(),
   onChange: () => renderTapeUI(),
 });
 const tapeBtn = $('#tapeBtn'), tapeBar = $('#tapeBar');
@@ -436,81 +533,246 @@ function walkInAt(point) {
     const d = doll.target.clone().sub(dollCam.position);
     yaw = Math.atan2(d.x, -d.z) / DEG;
   }
-  walk.setPose({ x, y: HEIGHT.eye, z, yaw, pitch: -4 });
+  walk.setPose({ x, y: EYE, z, yaw, pitch: -4 });
   setMode('walk');
 }
 
 // ---------------------------------------------------------------------------
-// Designs: saving, sharing, view-only, your own version
-const session = new DesignSession({
-  getDoc: () => layout.doc(),
+// The unit itself: build it, and rebuild it when it changes.
+function disposeUnit() {
+  for (const d of doors) built.remove(d.pivot);
+  built.clear();
+  arch?.dispose?.();
+  fixtures?.dispose?.();
+  arch = fixtures = null;
+  doors = [];
+  if (city) { scene.remove(city); city.dispose?.(); city = null; }
+}
+
+// `fresh` frames the cameras on it (another unit opened). Otherwise they move
+// only when the unit gets its first rooms or its size changes a lot.
+function showUnit(spec, { fresh = false } = {}) {
+  const clean = cleanUnit(spec ?? {}).unit;
+  const key = JSON.stringify(clean);
+  if (key === shownSpec && arch) return;
+  let next;
+  try { next = buildUnit(clean, { checks: false }); } catch (err) { console.error(err); layout.toast('This unit couldn\'t be built.'); return; }
+  const before = { empty: !arch || U.empty, k: SIZE.k, x: CENTER.x, z: CENTER.z };
+  disposeUnit();
+  U = next;
+  shownSpec = key;
+  try {
+    arch = buildArchitecture(M, U);
+    fixtures = buildFixtures(M, U);
+  } catch (err) {
+    console.error(err);
+    layout.toast('Part of this unit couldn\'t be drawn.');
+  }
+  if (arch) {
+    built.add(arch.walls, arch.cutCaps, arch.tops, arch.floors, arch.ceilings, arch.trim, arch.glass);
+    doors = arch.doors ?? [];
+    doors.forEach((d) => built.add(d.pivot));
+  }
+  if (fixtures) built.add(fixtures.solid, fixtures.glass, fixtures.soffit);
+  if (!U.empty) {
+    city = buildSurroundings(U);
+    scene.add(city);
+  }
+  built.visible = !U.empty;
+  plot.visible = U.empty;
+  plot.position.set((U.bounds.x0 + U.bounds.x1) / 2, 0, (U.bounds.z0 + U.bounds.z1) / 2);
+  measureUnit();
+  layout.setUnit(U);
+  tape.setUnit(U);
+  clearHighlight();
+  buildPlanOverlay();
+  renderRooms();
+  renderLabels();
+  renderUnitInfo();
+  renderMeasured();
+
+  const moved = Math.hypot(CENTER.x - before.x, CENTER.z - before.z) > 0.25 * REF.long * SIZE.k;
+  const resized = Math.abs(SIZE.k - before.k) / Math.max(before.k, 0.1) > 0.25;
+  if (fresh || (before.empty && !U.empty) || moved || resized) {
+    const animate = !fresh && mode === 'dollhouse' && !U.empty;
+    applyViewOffset();
+    fitPlan();
+    homeDollhouse(animate);
+    homePlan(false);
+    walk.setPose(startPose());
+  } else if (mode === 'walk' && isBlocked(walk.x, walk.z, 0.2)) {
+    walk.setPose(startPose());
+  }
+  applyModeVisibility();
+  setLighting(mode ?? 'dollhouse');
+  invalidate();
+}
+
+// ---------------------------------------------------------------------------
+// Units on the server: opening, saving, sharing, view-only, your own version
+let loadedHome = false;
+const session = new UnitSession({
   onLoad: (doc, ss) => {
-    layout.load(doc, { readOnly: !ss.editable });
-    renderDesign(ss);
+    // Measurements stay when the same unit comes back (your own copy of it).
+    const was = shownSpec;
+    showUnit(doc?.unit ?? null, { fresh: true });
+    if (shownSpec !== was) tape.clear();
+    renderTapeUI();
+    layout.load(doc ?? { items: [], assets: [] }, { readOnly: ss.role !== 'owner' });
+    renderSession(ss);
+    if (ss.role === 'home') setSheet(narrow());
+    else if (narrow()) setSheet(false);
+    // The same unit leaving (or reaching) the home page's welcome sheet on a
+    // phone: frame it for the screen it now has.
+    const home = ss.role === 'home';
+    if (shownSpec === was && home !== loadedHome && narrow()) {
+      applyViewOffset();
+      fitPlan();
+      homeDollhouse(ready.shown);
+      homePlan(false);
+    }
+    loadedHome = home;
   },
-  onRemote: (doc, ss) => layout.applyRemote(doc, ss.pendingUids()),
-  onState: (ss) => renderDesign(ss),
+  onRemote: (doc, ss) => {
+    if (doc.unitRev !== ss.unitRev) showUnit(doc.unit);
+    layout.applyRemote(doc, ss.pendingUids());
+  },
+  onState: (ss) => renderSession(ss),
 });
 
+const BUILD_PROMPT = 'Build my apartment in 3D Living Space from the floor plan and photos I\'m sharing. Work to scale: get the scale from the room sizes printed on the plan, trace each room as the clear floor inside its walls, then add every door (with the way it swings), the windows, the kitchen cabinets and appliances, the bathroom fixtures, closets and laundry, and the finishes you can see in the photos. Fix every problem the tools report, then tell me what you couldn\'t see and what you assumed.';
+const FURNISH_PROMPT = 'Furnish my unit in 3D Living Space. First ask me how I live and what style I like. Then place furniture that fits: keep 36" walkways, don\'t block any door swings, and check every room\'s clearances before you finish.';
+$('#buildPromptText').textContent = BUILD_PROMPT;
+$('#furnishPromptText').textContent = FURNISH_PROMPT;
+
 const ui = {
-  title: $('#designTitle'), author: $('#designAuthor'), status: $('#saveStatus'), line: $('#designLine'),
+  title: $('#designTitle'), author: $('#designAuthor'), status: $('#saveStatus'), line: $('#designLine'), lede: $('#lede'),
   chip: $('#viewChip'), chipText: $('#viewChipText'), notice: $('#viewNotice'), noticeText: $('#viewNoticeText'),
-  shareGroup: $('#shareGroup'), card: $('#cardPreview'), viewLink: $('#viewLink'), editGroup: $('#editGroup'),
-  mcpUrl: $('#mcpUrl'), mine: $('#myDesigns'), add: $('#addGroup'), layoutTools: $('#layoutTools'),
+  card: $('#cardPreview'), viewLink: $('#viewLink'), homeStatus: $('#homeStatus'),
 };
-ui.mcpUrl.value = `${location.origin}${new URL(document.baseURI).pathname}mcp`;
 
 const STATUS = {
   loading: 'Opening…',
-  new: 'Not saved yet. Add a piece to save it and get a link.',
-  missing: 'This design doesn\'t exist. It may have been mistyped.',
+  missing: 'This unit doesn\'t exist.',
   offline: 'Can\'t reach the server, so nothing will be saved.',
 };
-function renderDesign(ss) {
-  const mine = ss.role === 'owner' || ss.role === 'new';
-  const named = ss.title || (ss.role === 'new' ? 'New design' : 'Untitled design');
-  ui.line.textContent = ss.role === 'loading' ? '' : `${named}${ss.author ? ` · by ${ss.author}` : ''}`;
+const unitName = (ss) => ss.title || (ss.isExample ? 'The example unit' : 'Untitled unit');
+
+// The eyebrow and lede: what kind of unit this is.
+function renderUnitInfo() {
+  const s = U.spec;
+  const eyebrow = $('#eyebrow');
+  eyebrow.textContent = '';
+  const parts = [];
+  if (U.empty) parts.push('New unit', 'Nothing built yet');
+  else {
+    const beds = s.beds ?? U.rooms.filter((r) => r.kind === 'bedroom').length;
+    const baths = s.baths ?? U.rooms.filter((r) => r.kind === 'bath').length;
+    parts.push(beds ? `${beds} Bed` : 'Studio');
+    if (baths) parts.push(`${baths} Bath`);
+    parts.push(fmtArea(s.sqft ?? U.area));
+  }
+  for (const p of parts) eyebrow.append(make('span', null, p));
+  $('#cutLabel').textContent = `Cut walls at ${fmtLen(4.5)}`;
+}
+
+function renderSession(ss) {
+  const role = ss.role, home = role === 'home', mine = role === 'owner', visitor = role === 'viewer';
+  document.body.dataset.role = role;
+  $('#welcome').hidden = !home;
+  $('#unitView').hidden = home;
+  panel.classList.toggle('welcome-mode', home);
+  stage.classList.toggle('home', home);
+  stage.classList.toggle('visitor', visitor);
+  const empty = U.empty && (mine || visitor);
+  const nothing = ['loading', 'missing', 'offline'].includes(role);
+  stage.classList.toggle('empty', empty || nothing);
+  plot.visible = empty;
+  $('#eyebrow').hidden = nothing;
+  if (empty && tape.active) setMeasuring(false);
+
+  // Title block
+  ui.line.textContent = ['loading', 'missing', 'offline'].includes(role) ? '' : `${unitName(ss)}${ss.author ? ` · by ${ss.author}` : ''}`;
+  ui.lede.textContent = role === 'missing' ? 'This unit doesn\'t exist. The link may have been mistyped.'
+    : role === 'offline' ? 'Can\'t reach the server right now.'
+      : empty ? (mine ? 'Nothing built yet. Build it with Claude from your floor plan and photos.' : 'Its owner hasn\'t built it yet.')
+        : mine ? 'Your unit. Furnish it, measure it, walk through it, and share it.'
+          : ss.isExample ? 'A to-scale model of a 2 bed, 2 bath apartment. Make your own version to furnish it, or build your own unit with Claude.'
+            : 'A to-scale model of an apartment. Look around, then make your own version to furnish it your way.';
   if (document.activeElement !== ui.title) ui.title.value = ss.title;
   if (document.activeElement !== ui.author) ui.author.value = ss.author;
-  ui.title.disabled = ui.author.disabled = !mine;
   ui.status.dataset.state = ss.status;
-  ui.status.textContent = STATUS[ss.role]
-    ?? (ss.role === 'viewer' ? 'View only. Make your own version to change it.'
+  ui.status.textContent = STATUS[role]
+    ?? (visitor ? 'View only. Make your own version to change it.'
       : ss.status === 'saving' ? 'Saving…' : ss.status === 'error' ? (ss.error || 'Not saved.') : 'Saved. Changes save as you go.');
+
   // Visitors get a clear way to make their own.
-  const visitor = ss.role === 'viewer';
-  ui.chip.hidden = !visitor;
-  stage.classList.toggle('visitor', visitor);
-  ui.notice.hidden = !visitor && ss.role !== 'missing';
+  ui.chip.hidden = !visitor || empty;
   const who = ss.author ? `${ss.author}'s` : 'someone\'s';
-  ui.chipText.textContent = ss.title ? `${ss.title} · by ${ss.author || 'anonymous'}` : `Viewing ${who} design`;
-  ui.noticeText.textContent = ss.role === 'missing' ? 'This design doesn\'t exist.' : `This is ${who} design. Make your own version to move things around, add pieces or design it with AI.`;
-  ui.add.hidden = ui.layoutTools.hidden = !mine;
-  ui.shareGroup.hidden = !ss.id;
-  ui.editGroup.hidden = !ss.editUrl();
+  ui.chipText.textContent = ss.isExample ? 'The example unit' : ss.title ? `${ss.title}${ss.author ? ` · by ${ss.author}` : ''}` : ss.author ? `${who} unit` : '';
+  ui.notice.hidden = !visitor || empty;
+  ui.noticeText.textContent = ss.isExample ? 'This is the example unit. Make your own version to furnish it, or create a unit of your own.' : `This is ${who} unit. Make your own version to move things around, add pieces, or furnish it with Claude.`;
+  $('#shareNoticeText').textContent = ui.noticeText.textContent;
+  $('#addGroup').hidden = !mine || U.empty;
+  $('#layoutTools').hidden = !mine;
+  $('#furnishEmpty').hidden = !U.empty || !(mine || visitor);
+  $('#layoutGroup').hidden = U.empty && !layout.items.length;
+
+  // Empty unit, missing unit, no connection
+  $('#emptyPanel').hidden = !empty;
+  $('#emptyStage').hidden = !empty;
+  const noticeRole = role === 'missing' || role === 'offline';
+  $('#stageNotice').hidden = !noticeRole;
+  if (noticeRole) {
+    $('#noticeTitle').textContent = role === 'missing' ? 'This unit doesn\'t exist' : 'Can\'t reach the server';
+    $('#noticeText').textContent = role === 'missing' ? 'The link may have been mistyped, or the unit was removed.' : 'Check your connection, then try again.';
+    $('#noticeRetry').hidden = role !== 'offline';
+    $('#noticeCreate').hidden = role !== 'missing';
+  }
+
+  // Links
+  $('#shareGroup').hidden = !ss.id;
   if (ss.id) {
     ui.viewLink.value = ss.viewUrl();
-    const src = `api/designs/${ss.id}/card.png?v=${ss.version}`;
+    const src = `api/units/${ss.id}/card.png?v=${ss.version}`;
     if (ui.card.getAttribute('src') !== src) ui.card.src = src;
   }
-  const list = ss.ownedDesigns().sort((a, b) => (b.at ?? 0) - (a.at ?? 0));
-  ui.mine.innerHTML = '';
-  for (const d of list) {
-    const li = document.createElement('li');
-    const b = document.createElement('button');
-    b.className = 'piece-row';
-    b.dataset.design = d.id;
-    b.setAttribute('aria-current', String(d.id === ss.id));
-    const name = document.createElement('span');
-    name.textContent = d.title || 'Untitled design';
-    const when = document.createElement('small');
-    when.textContent = d.at ? new Date(d.at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '';
-    b.append(name, when);
+  const mcp = ss.mcpUrl() ?? '';
+  $$('.mcp-url').forEach((i) => { i.value = mcp; });
+
+  // Your units, here and on the home page
+  const list = ss.ownedUnits();
+  renderUnitList($('#myUnits'), list, ss.id);
+  $('#myUnitsEmpty').hidden = list.length > 0;
+  renderUnitList($('#homeUnits'), list, null);
+  $('#homeUnitsGroup').hidden = !list.length;
+  $$('[data-go="create"], [data-go="example"], [data-go="fork"]').forEach((b) => { b.disabled = ss.busy; });
+  ui.homeStatus.dataset.state = ss.error && home ? 'error' : '';
+  ui.homeStatus.textContent = home ? (ss.busy ? 'Making your unit…' : ss.error ?? '') : '';
+
+  document.title = home ? '3D Living Space' : ss.id ? `${unitName(ss)} · 3D Living Space` : '3D Living Space';
+  ready.session = role !== 'loading';
+  invalidate();
+}
+
+function renderUnitList(ul, list, current) {
+  ul.textContent = '';
+  for (const u of list) {
+    const b = make('button', 'piece-row');
+    b.dataset.unit = u.id;
+    b.setAttribute('aria-current', String(u.id === current));
+    b.append(make('span', null, u.title || 'Untitled unit'), make('small', null, u.at ? new Date(u.at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : ''));
+    const li = make('li');
     li.append(b);
-    ui.mine.append(li);
+    ul.append(li);
   }
-  $('#myDesignsEmpty').hidden = list.length > 0;
-  document.title = ss.title ? `${ss.title} · 3D Living Space` : '3D Living Space';
+}
+for (const ul of [$('#myUnits'), $('#homeUnits')]) {
+  ul.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-unit]');
+    if (b && b.dataset.unit !== session.id) session.open(b.dataset.unit, { push: true });
+    else if (b && narrow()) setSheet(false);
+  });
 }
 
 let infoTimer = 0;
@@ -520,19 +782,28 @@ for (const input of [ui.title, ui.author]) {
     infoTimer = setTimeout(() => session.setInfo({ title: ui.title.value.trim(), author: ui.author.value.trim() }), 400);
   });
 }
-async function makeOwn() {
-  const doc = await session.fork();
-  if (doc) layout.toast('This copy is yours. Changes save as you go.');
-}
-$('#forkBtn').addEventListener('click', makeOwn);
-$('#forkChip').addEventListener('click', makeOwn);
-$('#newDesign').addEventListener('click', () => { session.newDesign(); openTab('t-furniture'); });
-ui.mine.addEventListener('click', (e) => {
-  const b = e.target.closest('[data-design]');
-  if (b && b.dataset.design !== session.id) session.open(b.dataset.design);
+
+// Buttons that go somewhere: a new unit, a copy of the example, your own
+// version of this one, home, or another try at the server.
+document.addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-go]');
+  if (!b) return;
+  const go = b.dataset.go;
+  if (go === 'home') { if (session.role === 'home') setSheet(narrow()); else session.home({ push: true }); return; }
+  if (go === 'retry') { session.retry(); return; }
+  if (session.busy) return;
+  const doc = go === 'create' ? await session.create()
+    : go === 'example' ? await session.create({ from: 'example' })
+      : await session.fork();
+  if (doc) {
+    layout.toast(go === 'create' ? 'Your new unit is ready. Build it with Claude.' : 'This copy is yours. Changes save as you go.');
+    if (go === 'create' && narrow()) setSheet(false);
+  } else if (session.error) layout.toast(session.error);
 });
+$('#homeLink').addEventListener('click', (e) => { e.preventDefault(); if (session.role !== 'home') session.home({ push: true }); });
 
 async function copy(text, done) {
+  if (!text) return;
   try {
     await navigator.clipboard.writeText(text);
     layout.toast(done);
@@ -540,20 +811,63 @@ async function copy(text, done) {
     window.prompt('Copy this', text);
   }
 }
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-copy]');
+  if (!b) return;
+  const what = b.dataset.copy;
+  if (what === 'mcp') copy(session.mcpUrl(), 'MCP URL copied. Keep it to yourself and your own Claude.');
+  else if (what === 'edit') copy(session.editUrl(), 'Edit link copied. Keep it private.');
+  else if (what === 'prompt-build') copy(BUILD_PROMPT, 'Prompt copied. Paste it into Claude with your plan and photos.');
+  else if (what === 'prompt-furnish') copy(FURNISH_PROMPT, 'Prompt copied');
+});
 $('#copyView').addEventListener('click', async () => {
   const url = session.viewUrl();
   if (!url) return;
   if (navigator.share && coarse) {
-    try { await navigator.share({ title: session.title || '3D Living Space', text: 'My version of this apartment', url }); return; } catch (err) { if (err?.name === 'AbortError') return; }
+    try { await navigator.share({ title: session.title || '3D Living Space', text: 'Have a look around, then make your own version.', url }); return; } catch (err) { if (err?.name === 'AbortError') return; }
   }
   copy(url, 'Link copied');
 });
-$('#copyEdit').addEventListener('click', () => copy(session.editUrl(), 'Edit link copied. Keep it private.'));
-$('#copyMcp').addEventListener('click', () => copy(ui.mcpUrl.value, 'MCP server address copied'));
-$('#copyPrompt').addEventListener('click', () => {
-  const link = session.editUrl();
-  copy(link ? `Use 3D Living Space to furnish my design: ${link}` : 'Use 3D Living Space to make me a new design of the apartment, then give me the links.', 'Prompt copied');
+
+// ---------------------------------------------------------------------------
+// Display units
+const unitsControl = $('#unitsControl');
+function renderUnitsControl() {
+  unitsControl.querySelectorAll('[data-units]').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.units === units.getUnits())));
+}
+unitsControl.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-units]');
+  if (b) units.setUnits(b.dataset.units);
 });
+units.onUnitsChange(() => {
+  renderUnitsControl();
+  renderRooms();
+  renderLabels();
+  renderUnitInfo();
+  renderMeasured();
+  layout.refreshUnits();
+  tape.refreshLabels();
+  invalidate();
+});
+renderUnitsControl();
+
+// How the example was measured (it, and copies of it, carry its plan picture).
+function renderMeasured() {
+  const show = !!U.planImage;
+  $('#measuredGroup').hidden = !show;
+  if (!show) return;
+  // Short lengths read in inches in the original look.
+  const short = (ft) => (units.getUnits() === 'ftin' ? `${Math.round(ft * 12)}"` : fmtLen(ft));
+  $('#measuredNotes').innerHTML = [
+    `<b>Walls and openings</b> are traced from the leasing plan at 25.86 px per foot, which reproduces both bedrooms' printed sizes within ${short(2 / 12)}.`,
+    `<b>Two tape measurements</b> from the living room's window wall (to the side of the fridge, ${fmtLen(112 / 12)}, and to the bedroom door, about ${fmtLen(129.5 / 12)}) both came out about ${short(4 / 12)} longer than the drawing, so that wall sits ${short(4 / 12)} further out than the plan draws it.`,
+    `<b>Ceiling height ${fmtLen(9)}</b> comes from solving where each photo was taken, using wall corners and floor and ceiling lines that the plan locates.`,
+    `<b>Living room window</b> is a ${fmtLen(83 / 12)} opening centered on the wall, measured from the photo. The plan symbol draws it about ${fmtLen(9)}. Sills sit about ${short(23 / 12)} up and heads line up with the ${fmtLen(8)} doors.`,
+    '<b>Kitchen</b> follows the photo: fridge, base cabinet, and range along the back wall; sink and dishwasher on the side wall facing the dining area.',
+    '<b>Primary bath</b> follows the photos (walk-in shower with a glass panel, vanity and toilet side by side). The plan shows a corner shower.',
+    '<b>Bath 2 and Bedroom 2</b> weren\'t photographed, so they follow the plan with matching finishes.',
+  ].map((t) => `<li>${t}</li>`).join('');
+}
 
 // ---------------------------------------------------------------------------
 // Minimap (walk view)
@@ -563,22 +877,23 @@ let mmT = null;
 function drawMinimap() {
   if (mode !== 'walk' || mm.hidden) return;
   const dpr = Math.min(devicePixelRatio, 2), W = mm.clientWidth, H = mm.clientHeight;
+  if (!W || !H) return;
   if (mm.width !== Math.round(W * dpr)) { mm.width = Math.round(W * dpr); mm.height = Math.round(H * dpr); }
-  const pad = 10, fw = fp.x1 - fp.x0, fh = fp.z1 - fp.z0;
+  const b = U.bounds, pad = 10, fw = b.x1 - b.x0, fh = b.z1 - b.z0;
   const s = Math.min((W - 2 * pad) / fw, (H - 2 * pad) / fh);
-  const ox = (W - fw * s) / 2 - fp.x0 * s, oz = (H - fh * s) / 2 - fp.z0 * s;
+  const ox = (W - fw * s) / 2 - b.x0 * s, oz = (H - fh * s) / 2 - b.z0 * s;
   mmT = { s, ox, oz };
   const g = mctx;
   g.setTransform(dpr, 0, 0, dpr, 0, 0);
   g.clearRect(0, 0, W, H);
   g.fillStyle = colors.surface2;
-  for (const r of ROOMS) {
+  for (const r of U.rooms) {
     g.beginPath();
     r.poly.forEach(([x, z], i) => (i ? g.lineTo(ox + x * s, oz + z * s) : g.moveTo(ox + x * s, oz + z * s)));
     g.closePath(); g.fill();
   }
   g.fillStyle = colors.ink;
-  for (const [x0, z0, x1, z1] of wallPieces) g.fillRect(ox + x0 * s, oz + z0 * s, (x1 - x0) * s, (z1 - z0) * s);
+  for (const [x0, z0, x1, z1] of U.wallRects) g.fillRect(ox + x0 * s, oz + z0 * s, (x1 - x0) * s, (z1 - z0) * s);
   const cx = ox + walk.x * s, cz = oz + walk.z * s;
   const half = (Math.atan(Math.tan((walkCam.fov / 2) * DEG) * walkCam.aspect)) / DEG;
   const a0 = (walk.yaw - 90 - half) * DEG, a1 = (walk.yaw - 90 + half) * DEG;
@@ -595,18 +910,18 @@ mm.addEventListener('pointerdown', (e) => {
   const r = mm.getBoundingClientRect();
   const x = (e.clientX - r.left - mmT.ox) / mmT.s, z = (e.clientY - r.top - mmT.oz) / mmT.s;
   if (isBlocked(x, z, walk.radius)) return;
-  walk.setPose({ x, y: HEIGHT.eye, z, yaw: walk.yaw, pitch: walk.pitch }, { animate: true, duration: 0.7 });
+  walk.setPose({ x, y: EYE, z, yaw: walk.yaw, pitch: walk.pitch }, { animate: true, duration: 0.7 });
   invalidate();
 });
 
-// Scale bar (plan view)
+// Scale bar (plan view): feet, or meters in centimeters mode.
 const scalebar = $('#scalebar');
 function updateScalebar() {
   if (mode !== 'plan') return;
   const ppf = stage.clientHeight / ((planCam.top - planCam.bottom) / planCam.zoom);
-  const L = [1, 2, 5, 10, 20].find((l) => l * ppf >= 56) ?? 20;
-  scalebar.querySelector('span').style.width = `${L * ppf}px`;
-  scalebar.querySelector('b').textContent = `${L} ft`;
+  const step = units.scaleStep(56 / ppf);
+  scalebar.querySelector('span').style.width = `${step.ft * ppf}px`;
+  scalebar.querySelector('b').textContent = step.label;
 }
 
 // ---------------------------------------------------------------------------
@@ -619,7 +934,7 @@ const activeCam = () => (mode === 'walk' ? walkCam : mode === 'plan' ? planCam :
 const HINTS = {
   dollhouse: coarse ? 'Drag to orbit · Pinch to zoom · Double-tap a room to walk in' : 'Drag to orbit · Right-drag to pan · Scroll to zoom · Double-click a room to walk in',
   plan: coarse ? 'Drag to pan · Pinch to zoom · Double-tap to walk in' : 'Drag to pan · Scroll to zoom · Double-click to walk in',
-  walk: coarse ? 'Drag to look · Use the pad to move · Tap the floor to walk there' : 'Drag to look · WASD or arrows to move · Click the floor to walk there · Click a door to swing it',
+  walk: coarse ? 'Drag to look · Use the pad to move · Tap the floor to walk there' : 'Click to look around · WASD or arrows to move · Click a door to swing it',
 };
 const hint = $('#hint');
 let hintTimer = 0;
@@ -632,11 +947,20 @@ function showHint() {
 }
 function dismissHint() { hint.classList.add('gone'); }
 
-function applyClipping() {
-  const on = cutaway && mode === 'dollhouse';
-  renderer.clippingPlanes = on ? [clipPlane] : [];
-  arch.cutCaps.visible = on;
-  arch.tops.visible = mode !== 'walk' && !on;
+// What shows in each view: ceilings, soffits and the street only from inside.
+function applyModeVisibility() {
+  const inside = mode === 'walk';
+  const cut = cutaway && mode === 'dollhouse';
+  renderer.clippingPlanes = cut ? [clipPlane] : [];
+  if (arch) {
+    arch.ceilings.visible = inside;
+    arch.cutCaps.visible = cut;
+    arch.tops.visible = mode !== 'walk' && !cut;
+  }
+  if (fixtures?.soffit) fixtures.soffit.visible = inside;
+  if (city) city.visible = inside;
+  scene.background = inside ? null : bgColor;
+  if (planOverlay) planOverlay.visible = mode === 'plan' && $('#optOverlay').checked;
 }
 
 function setMode(m, { keepHash = false } = {}) {
@@ -646,32 +970,74 @@ function setMode(m, { keepHash = false } = {}) {
   plan.enabled = m === 'plan';
   walk.enabled = m === 'walk';
   const inside = m === 'walk';
-  arch.ceilings.visible = inside;
-  city.visible = inside;
-  scene.background = inside ? null : bgColor;
-  planOverlay.visible = m === 'plan' && $('#optOverlay').checked;
-  applyClipping();
+  applyModeVisibility();
   setLighting(m);
   document.querySelectorAll('.mode').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.mode === m)));
   $('#minimap').hidden = !inside;
   $('#joystick').hidden = !(inside && coarse);
   scalebar.hidden = m !== 'plan';
   if (inside) fitWalkFov();
-  if (!keepHash) history.replaceState(null, '', `${location.pathname}${location.search}#${m}`);
+  if (!keepHash) history.replaceState(history.state, '', `${location.pathname}${location.search}#${m}`);
   tape.cancel();
   showHint();
   invalidate();
 }
 document.querySelectorAll('.mode').forEach((b) => b.addEventListener('click', () => setMode(b.dataset.mode)));
 
+// The part of the stage the panel and the top bar cover. On phones that is the
+// sheet's peek, or the open welcome sheet on the home page, which leaves the
+// example in view above it.
+const SHEET_PEEK = 112;
+const shortScreen = () => stage.clientHeight < 560 && !narrow();
+function covered() {
+  // Phones held sideways: the view buttons take a good share of the height.
+  if (!narrow()) return { top: shortScreen() ? 52 : 0, bottom: 0 };
+  const sheet = session?.role === 'home' && panel.classList.contains('open') ? panel.offsetHeight : SHEET_PEEK;
+  return { top: 44, bottom: sheet };
+}
+function applyViewOffset() {
+  const w = stage.clientWidth, h = Math.max(1, stage.clientHeight);
+  // Keep the dollhouse clear of the phone's top bar and bottom sheet.
+  const c = covered();
+  if (c.top || c.bottom) dollCam.setViewOffset(w, h, 0, (c.bottom - c.top) / 2, w, h); else dollCam.clearViewOffset();
+  dollCam.updateProjectionMatrix();
+}
+
+// How far back a camera looking along `dir` must stand to see the whole unit,
+// walls up to the ceiling included, in a view of the given tangents.
+function fitDistance(dir, tanH, tanV) {
+  const b = U.bounds, H = Math.max(U.heights.ceiling, ...U.rooms.map((r) => r.ceiling));
+  const f = dir.clone().negate();
+  const r = new THREE.Vector3().crossVectors(f, new THREE.Vector3(0, 1, 0)).normalize();
+  const u = new THREE.Vector3().crossVectors(r, f);
+  const v = new THREE.Vector3();
+  let D = 0;
+  for (const x of [b.x0, b.x1]) for (const y of [0, H]) for (const z of [b.z0, b.z1]) {
+    v.set(x - CENTER.x, y, z - CENTER.z);
+    D = Math.max(D, v.dot(dir) + Math.abs(v.dot(r)) / tanH, v.dot(dir) + Math.abs(v.dot(u)) / tanV);
+  }
+  return D;
+}
+
 function homeDollhouse(animate = true) {
-  const hfov = 2 * Math.atan(Math.tan((dollCam.fov / 2) * DEG) * dollCam.aspect);
-  // Portrait phones look along the unit's long side so it fills the screen height.
-  const dist = portrait() ? Math.max(48, 17 / Math.tan(hfov / 2)) : Math.max(62, 25 / Math.tan(hfov / 2));
-  const dir = (portrait() ? new THREE.Vector3(0.62, 0.86, 0.12) : new THREE.Vector3(0.3, 0.9, 0.42)).normalize();
+  const c = covered();
+  const h = Math.max(1, stage.clientHeight), visH = Math.max(1, h - c.top - c.bottom);
+  const tall = stage.clientWidth / (narrow() ? visH : h) < 0.85;
+  const k = SIZE.k;
+  const tanV = Math.tan((dollCam.fov / 2) * DEG), tanH = tanV * dollCam.aspect;
+  // Portrait screens look along the unit's long side so it fills the screen height.
+  let dist = tall ? Math.max(48 * k, (17 * k) / tanH) : Math.max(62 * k, (25 * k) / tanH);
+  // Under a tall sheet, back off until the unit fits in the strip above it.
+  if (c.bottom > 200) dist = Math.max(dist, (17.5 * k) / (tanV * (visH / h)));
+  else if (!narrow() && c.top) dist *= h / visH;
+  const d = tall ? [0.62, 0.86, 0.12] : [0.3, 0.9, 0.42];
+  const dir = new THREE.Vector3(...(SIZE.w >= SIZE.d ? d : [d[2], d[1], d[0]])).normalize();
+  // Small units with tall walls need more room than their footprint suggests.
+  // (The example crops its wall tops a little, as it always has; so may they.)
+  dist = Math.max(dist, 0.9 * fitDistance(dir, tanH, tanV * (visH / h)));
   const pos = CENTER.clone().add(dir.multiplyScalar(dist));
   if (animate) tweenOrbit(doll, dollCam, CENTER, pos);
-  else { doll.target.copy(CENTER); dollCam.position.copy(pos); doll.update(); }
+  else { orbitTween = null; doll.target.copy(CENTER); dollCam.position.copy(pos); doll.update(); }
 }
 function homePlan(animate = true) {
   const pos = new THREE.Vector3(CENTER.x, planCam.position.y, CENTER.z);
@@ -681,7 +1047,7 @@ function homePlan(animate = true) {
 $('#recenter').addEventListener('click', () => {
   if (mode === 'dollhouse') homeDollhouse();
   else if (mode === 'plan') homePlan();
-  else walk.setPose(ENTRY_POSE, { animate: true });
+  else walk.setPose(startPose(), { animate: true });
   invalidate();
 });
 
@@ -706,20 +1072,30 @@ $('#optLabels').addEventListener('change', (e) => { showLabels = e.target.checke
 $('#optCutaway').addEventListener('change', (e) => {
   cutaway = e.target.checked;
   if (cutaway && mode !== 'dollhouse') setMode('dollhouse');
-  applyClipping();
+  applyModeVisibility();
   invalidate();
 });
 $('#optOverlay').addEventListener('change', (e) => {
   if (e.target.checked && mode !== 'plan') setMode('plan');
-  planOverlay.visible = mode === 'plan' && e.target.checked;
+  applyModeVisibility();
   invalidate();
 });
 
 const handle = $('#sheetHandle');
 function setSheet(open) {
+  const was = panel.classList.contains('open');
   panel.classList.toggle('open', open);
   handle.setAttribute('aria-expanded', String(open));
   handle.setAttribute('aria-label', open ? 'Hide details' : 'Show details');
+  // A closed sheet peeks at its title, not wherever it was scrolled to.
+  if (!open) $('#welcome').scrollTop = 0;
+  // On the home page the example re-frames into whatever the sheet leaves free.
+  if (was !== open && session?.role === 'home' && narrow()) {
+    applyViewOffset();
+    fitPlan();
+    homeDollhouse(ready.shown);
+    invalidate();
+  }
 }
 handle.addEventListener('click', () => setSheet(!panel.classList.contains('open')));
 {
@@ -733,7 +1109,7 @@ handle.addEventListener('click', () => setSheet(!panel.classList.contains('open'
     if (dy < -24) setSheet(true);
     else if (dy > 24) setSheet(false);
   };
-  for (const el of [handle, $('.title-block')]) {
+  for (const el of [handle, $('#titleBlock'), $('#welcomeHead')]) {
     el.addEventListener('pointerdown', start);
     el.addEventListener('pointerup', end);
   }
@@ -746,41 +1122,47 @@ function fitWalkFov() {
   walkCam.fov = clamp((2 * Math.atan(Math.tan(41 * DEG) / a)) / DEG, 52, 96);
   walkCam.updateProjectionMatrix();
 }
-const portrait = () => stage.clientWidth / Math.max(1, stage.clientHeight) < 0.85;
+// Plan fills the free part of the stage. When the screen and the unit are
+// shaped differently (a tall phone, a wide unit) it turns so east is up.
+let planTurned = null;
 function fitPlan() {
   const w = stage.clientWidth, h = Math.max(1, stage.clientHeight), a = w / h;
-  const top = narrow() ? 64 : 70, bottom = narrow() ? 130 : 40;
+  const c = covered();
+  const top = narrow() ? 64 : 70, bottom = narrow() ? Math.max(130, c.bottom + 18) : 40;
   const usable = Math.max(120, h - top - bottom);
-  // Portrait phones: put plan east at the top so the long side runs up the screen.
-  planCam.up.set(...(portrait() ? [1, 0, 0] : [0, 0, -1]));
+  const turned = (w / usable < 0.85) !== (SIZE.d > SIZE.w);
+  planTurned = turned;
+  planCam.up.set(...(turned ? [1, 0, 0] : [0, 0, -1]));
   planCam.lookAt(plan.target);
-  const [fw, fh] = portrait() ? [fp.z1 - fp.z0 + 3, fp.x1 - fp.x0 + 3] : [fp.x1 - fp.x0 + 3, fp.z1 - fp.z0 + 3];
-  const vh = Math.max(fh, fw / a) * (h / usable);
+  const [fw, fh] = turned ? [SIZE.d + 3, SIZE.w + 3] : [SIZE.w + 3, SIZE.d + 3];
+  // Under the tall welcome sheet only the height is squeezed; otherwise the
+  // original framing (a little room to spare either way).
+  const vh = c.bottom > 200 ? Math.max(fh * (h / usable), (fw / a) * 1.08) : Math.max(fh, fw / a) * (h / usable);
   const shift = ((bottom - top) / 2) * (vh / h);
   Object.assign(planCam, { top: vh / 2 - shift, bottom: -vh / 2 - shift, left: (-vh * a) / 2, right: (vh * a) / 2 });
   planCam.updateProjectionMatrix();
 }
+let lastShape = null;
 function resize() {
   const w = stage.clientWidth, h = Math.max(1, stage.clientHeight);
   renderer.setSize(w, h, false);
   dollCam.aspect = walkCam.aspect = w / h;
-  // Keep the dollhouse clear of the phone's top bar and bottom sheet.
-  if (narrow()) dollCam.setViewOffset(w, h, 0, 34, w, h); else dollCam.clearViewOffset();
-  dollCam.updateProjectionMatrix();
+  applyViewOffset();
   fitWalkFov();
+  const turnedBefore = planTurned;
   fitPlan();
   // Re-frame the overviews when a phone turns between portrait and landscape.
-  if (lastPortrait !== null && lastPortrait !== portrait()) { homeDollhouse(false); homePlan(false); }
-  lastPortrait = portrait();
+  const shape = `${w / h < 0.85}:${narrow()}`;
+  if (lastShape !== null && (lastShape !== shape || turnedBefore !== planTurned)) { homeDollhouse(false); homePlan(false); }
+  lastShape = shape;
   invalidate();
 }
-let lastPortrait = null;
 new ResizeObserver(resize).observe(stage);
-resize();
+sheetMQ.addEventListener('change', () => { if (!narrow()) panel.classList.remove('open'); resize(); });
 
 // ---------------------------------------------------------------------------
 // Render loop (renders only when something changed)
-let shown = false;
+const ready = { shown: false, session: false };
 let lastTime = performance.now();
 function frame(now = performance.now()) {
   requestAnimationFrame(frame);
@@ -801,27 +1183,33 @@ function frame(now = performance.now()) {
   tape.update(activeCam());
   drawMinimap();
   updateScalebar();
-  if (!shown) { shown = true; $('#loading').classList.add('done'); window.app.ready = true; }
+  if (!ready.shown && ready.session) {
+    ready.shown = true;
+    $('#loading').classList.add('done');
+    window.app.ready = true;
+  }
 }
 
 // Start in the view named by the link (#dollhouse, #plan, #walk).
-homeDollhouse(false);
-homePlan(false);
 function openFromHash() {
   const h = location.hash.slice(1);
   if (/^(dollhouse|plan|walk)$/.test(h)) { if (h !== mode) setMode(h, { keepHash: true }); }
   else if (!mode) setMode('dollhouse', { keepHash: true });
 }
+resize();
 openFromHash();
 addEventListener('hashchange', openFromHash);
 if (!narrow()) setSheet(false);
 renderTapeUI();
-session.start();
 
 // Small hook for scripted screenshots and tests.
 window.app = {
   ready: false,
-  setMode, focusRoom, toggleDoor, invalidate, walk, doors, setSheet, layout, session, tape,
+  setMode, focusRoom, toggleDoor, invalidate, walk, setSheet, layout, session, tape, units,
+  get doors() { return doors; },
+  get U() { return U; },
+  // GPU memory and draw counts, to check that rebuilds don't leak.
+  get stats() { return { ...renderer.info.memory, calls: renderer.info.render.calls }; },
   // Screen position of a world point in the current view.
   project(x, y, z) {
     const p = project(x, y, z, activeCam());
@@ -830,4 +1218,5 @@ window.app = {
   },
   get mode() { return mode; },
 };
+session.start();
 requestAnimationFrame(frame);

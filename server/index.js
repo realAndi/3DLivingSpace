@@ -1,11 +1,11 @@
-// 3D Living Space server: the app, its designs API, link-preview pictures and
-// the MCP server, all under BASE_PATH. Listens on a port, or on a Unix socket
+// 3D Living Space server: the app, its units API, link-preview pictures and
+// one MCP server per unit, all under BASE_PATH. Listens on a port, or on a Unix socket
 // when LISTEN is a path (the droplet's nginx proxies to that).
 import { createServer } from 'node:http';
 import { chmodSync, rmSync } from 'node:fs';
 import { loadConfig } from './config.js';
 import { Store } from './store.js';
-import { Designs } from './service.js';
+import { Units } from './service.js';
 import { createPages } from './pages.js';
 import { createApi } from './api.js';
 import { createMcp } from './mcp.js';
@@ -13,14 +13,20 @@ import { AppError, RateLimiter, clientIp, json, send } from './http.js';
 
 const config = loadConfig();
 const store = new Store(config.dataDir);
-const designs = new Designs(store, config);
+const units = new Units(store, config);
+try {
+  const imported = units.importDesigns();
+  if (imported) console.log(`Brought ${imported} designs over as copies of the example unit.`);
+} catch (error) {
+  console.error('could not bring the old designs over', error);
+}
 const limiters = {
-  create: new RateLimiter(30, 60 * 60 * 1000),   // new designs and copies, per hour
+  create: new RateLimiter(30, 60 * 60 * 1000),   // new units and copies, per hour
   write: new RateLimiter(1500, 10 * 60 * 1000),  // saves and agent edits, per 10 minutes
   read: new RateLimiter(1200, 60 * 1000),        // views, polling and pictures, per minute
   mcp: new RateLimiter(900, 10 * 60 * 1000),
 };
-const handlers = [createApi(config, designs, limiters), createMcp(config, designs, limiters), createPages(config, designs)];
+const handlers = [createApi(config, units, limiters), createMcp(config, units, limiters), createPages(config, units)];
 
 const server = createServer(async (req, res) => {
   const url = new URL(req.url, 'http://local');
@@ -66,13 +72,13 @@ if (socket) {
   server.listen(socket, () => {
     // nginx runs as another user and must be able to connect.
     chmodSync(socket, 0o666);
-    console.log(`3D Living Space on ${socket} at ${config.basePath || '/'} (${store.count()} designs)`);
+    console.log(`3D Living Space on ${socket} at ${config.basePath || '/'} (${store.count()} units)`);
   });
 } else {
   server.listen(Number(config.listen), () => console.log(`3D Living Space at http://localhost:${config.listen}${config.basePath}/`));
 }
 
-// One backup a day, seven kept.
+// One backup a day, a week of them kept.
 const backup = () => { try { store.backup(); } catch (error) { console.error('backup failed', error); } };
 setTimeout(backup, 60_000).unref();
 setInterval(backup, 6 * 60 * 60 * 1000).unref();

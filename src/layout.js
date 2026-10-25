@@ -1,25 +1,26 @@
 import * as THREE from 'three';
 import { CATALOG, catalogByType, SWATCHES, buildPiece, bounds, nearPiece, isFlat } from './furniture.js';
-import { clearances } from './fit.js';
+import { clearances, problems } from './fit.js';
 import { cleanItem, randomId } from './design.js';
+import { fmtLen, fmtSize, fmtRug, toInput, fromInput, inputUnit } from './units.js';
 
-// Furniture on screen: add pieces from the catalog (or the design's own custom
+// Furniture on screen: add pieces from the catalog (or the unit's own custom
 // pieces), drag them into place, turn, resize and recolor them. While a piece
 // is selected, lines show its clearance to the nearest wall, counter or other
-// piece on each side. Every change goes out through onOps as pieces added,
-// changed or removed; the design session saves them. Designs that aren't yours
-// open read-only.
+// piece on each side, and the editor says what is wrong with where it sits.
+// Every change goes out through onOps as pieces added, changed or removed; the
+// unit session saves them. Units that aren't yours open read-only.
+//
+// `U` is the built unit (src/unit.js): walls and fixtures to keep clear of,
+// and where the floor is. setUnit() swaps it when the unit is rebuilt.
 
 const snap = (v, step = 1 / 12) => Math.round(v / step) * step;
-const inches = (ft) => {
-  const v = Math.round(ft * 12 * 2) / 2;
-  return Number.isInteger(v) ? String(v) : v.toFixed(1);
-};
 const escapeHTML = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
 export class LayoutEditor {
   constructor(opts) {
     Object.assign(this, opts);
+    this.U = opts.U ?? null;
     this.items = [];
     this.assets = {};
     this.groups = new Map();
@@ -84,6 +85,24 @@ export class LayoutEditor {
     return { items: this.items, assets: Object.values(this.assets) };
   }
 
+  // A new or rebuilt unit: walls and fixtures moved, so guides and warnings change.
+  setUnit(U) {
+    this.U = U;
+    this.#refreshSelection();
+    this.invalidate();
+  }
+
+  obstacles() { return this.U?.obstacles ?? []; }
+  insideUnit(x, z) { return !!this.U?.insideUnit(x, z); }
+
+  // The display units changed: every size on screen.
+  refreshUnits() {
+    this.#renderBaseCatalog();
+    this.#renderCatalog();
+    this.#renderList();
+    this.#refreshSelection();
+  }
+
   // ---------------------------------------------------------------- edits
   #emit(upsert = [], remove = []) {
     this.onOps?.({ upsert, remove });
@@ -97,7 +116,8 @@ export class LayoutEditor {
     const def = catalogByType[type];
     const size = asset ? { name: asset.name, w: asset.w / 12, d: asset.d / 12, h: asset.h / 12 } : { name: def.name, w: def.w / 12, d: def.d / 12, h: def.h / 12 };
     const item = { uid: randomId(8), type: asset ? 'asset' : type, ...(asset ? { asset: asset.id } : {}), ...size, x: 0, z: 0, rot: at?.rot ?? 0, color: null };
-    const p = this.#freeSpot(item, at?.x ?? 20, at?.z ?? 18);
+    const mid = this.#middle();
+    const p = this.#freeSpot(item, at?.x ?? mid.x, at?.z ?? mid.z);
     item.x = p.x; item.z = p.z;
     this.items.push(item);
     this.#mount(item);
@@ -248,7 +268,7 @@ export class LayoutEditor {
       }
       const el = document.createElement('div');
       el.className = 'guide-label';
-      el.textContent = this.fmt(c.dist);
+      el.textContent = fmtLen(c.dist);
       this.layer.append(el);
       this.guides.push({ el, x: (a[0] + b[0]) / 2, z: (a[1] + b[1]) / 2 });
     }
@@ -300,7 +320,13 @@ export class LayoutEditor {
     }
   }
 
-  // Where a new piece goes: the floor point in the middle of the view.
+  #middle() {
+    const b = this.U?.bounds ?? { x0: 0, z0: 0, x1: 30, z1: 20 };
+    return { x: (b.x0 + b.x1) / 2, z: (b.z0 + b.z1) / 2 };
+  }
+
+  // Where a new piece goes: the floor point in the middle of the view, or the
+  // middle of the unit.
   dropPoint() {
     const cam = this.getCamera();
     if (this.getMode() === 'walk') {
@@ -313,7 +339,7 @@ export class LayoutEditor {
     this.ray.setFromCamera(new THREE.Vector2(0, 0), cam);
     const p = new THREE.Vector3();
     if (this.ray.ray.intersectPlane(this.floorPlane, p) && this.insideUnit(p.x, p.z)) return { x: p.x, z: p.z, rot: 0 };
-    return { x: 30, z: 18, rot: 0 };
+    return { ...this.#middle(), rot: 0 };
   }
 
   // ---------------------------------------------------------------- pointer
@@ -341,7 +367,8 @@ export class LayoutEditor {
     let empty = null;
     // Capture phase, so a press on a piece never reaches the camera controls.
     el.addEventListener('pointerdown', (e) => {
-      if (!this.enabled || drag) return;
+      // With the cursor locked in Walk, clicks belong to the crosshair.
+      if (!this.enabled || drag || document.pointerLockElement === el) return;
       const uid = this.#pick(e);
       if (uid == null) {
         empty = { x: e.clientX, y: e.clientY, id: e.pointerId };
@@ -378,7 +405,7 @@ export class LayoutEditor {
     const end = (e) => {
       if (drag && e.pointerId === drag.id) {
         e.stopImmediatePropagation();
-        if (drag.moved && this.current) this.#emit([this.current]);
+        if (drag.moved && this.current) { this.#emit([this.current]); this.#renderEditor(); }
         drag = null;
         this.dragging = null;
         return;
@@ -420,12 +447,11 @@ export class LayoutEditor {
     const $ = (s) => document.querySelector(s);
     this.ui = {
       catalog: $('#catalog'), mine: $('#assetList'), mineGroup: $('#assetGroup'), list: $('#layoutList'), empty: $('#layoutEmpty'), editor: $('#pieceEditor'),
-      name: $('#peName'), w: $('#peW'), d: $('#peD'), h: $('#peH'), rot: $('#peRot'), swatches: $('#peSwatches'),
-      bar: $('#pieceBar'), barName: $('#pbName'), barDims: $('#pbDims'), toast: $('#toast'), count: $('#furnitureCount'),
+      name: $('#peName'), w: $('#peW'), d: $('#peD'), h: $('#peH'), rot: $('#peRot'), swatches: $('#peSwatches'), warn: $('#peWarn'),
+      bar: $('#pieceBar'), barName: $('#pbName'), barDims: $('#pbDims'), barWarn: $('#pbWarn'), toast: $('#toast'), count: $('#furnitureCount'),
+      suffixes: [...document.querySelectorAll('[data-len-unit]')],
     };
-    const groups = [...new Set(CATALOG.map((c) => c.group))];
-    this.ui.catalog.innerHTML = groups.map((g) => `<h3>${g}</h3><div class="catalog-grid">${CATALOG.filter((c) => c.group === g).map((c) =>
-      `<button class="cat-btn" data-type="${c.type}"><b>${c.name}</b><small>${c.build === 'rug' ? `${c.w / 12}' × ${c.d / 12}'` : `${c.w} × ${c.d} in`}</small></button>`).join('')}</div>`).join('');
+    this.#renderBaseCatalog();
     const addFrom = (e) => {
       const b = e.target.closest('[data-type], [data-asset]');
       if (!b) return;
@@ -441,9 +467,9 @@ export class LayoutEditor {
       if (b && this.current) this.update(this.current.uid, { color: b.dataset.color || null });
     });
     const dim = (input, key) => input.addEventListener('change', () => {
-      const v = parseFloat(input.value);
-      if (!this.current || !Number.isFinite(v) || v <= 0) return this.#renderEditor();
-      this.update(this.current.uid, { [key]: Math.min(key === 'h' ? 108 : 360, v) / 12 });
+      const ft = fromInput(input.value);
+      if (!this.current || ft === null || ft <= 0) return this.#renderEditor();
+      this.update(this.current.uid, { [key]: Math.max(1 / 12, Math.min(key === 'h' ? 9 : 30, ft)) });
     });
     dim(this.ui.w, 'w'); dim(this.ui.d, 'd'); dim(this.ui.h, 'h');
     this.ui.rot.addEventListener('change', () => {
@@ -488,12 +514,18 @@ export class LayoutEditor {
     });
   }
 
-  // The design's own custom pieces (made by an agent through MCP).
+  #renderBaseCatalog() {
+    const groups = [...new Set(CATALOG.map((c) => c.group))];
+    this.ui.catalog.innerHTML = groups.map((g) => `<h3>${g}</h3><div class="catalog-grid">${CATALOG.filter((c) => c.group === g).map((c) =>
+      `<button class="cat-btn" data-type="${c.type}"><b>${c.name}</b><small>${c.build === 'rug' ? fmtRug(c.w / 12, c.d / 12) : fmtSize(c.w / 12, c.d / 12)}</small></button>`).join('')}</div>`).join('');
+  }
+
+  // The unit's own custom pieces (made by an agent through MCP; sizes in inches).
   #renderCatalog() {
     const list = Object.values(this.assets);
     this.ui.mineGroup.hidden = !list.length;
     this.ui.mine.innerHTML = list.map((a) =>
-      `<button class="cat-btn" data-asset="${escapeHTML(a.id)}"><b>${escapeHTML(a.name)}</b><small>${Math.round(a.w)} × ${Math.round(a.d)} in</small></button>`).join('');
+      `<button class="cat-btn" data-asset="${escapeHTML(a.id)}"><b>${escapeHTML(a.name)}</b><small>${fmtSize(Math.round(a.w) / 12, Math.round(a.d) / 12)}</small></button>`).join('');
   }
 
   #renderList() {
@@ -501,7 +533,7 @@ export class LayoutEditor {
     empty.hidden = this.items.length > 0;
     count.textContent = this.items.length ? `${this.items.length}` : '';
     list.innerHTML = this.items.map((i) =>
-      `<li><button class="piece-row" data-piece="${escapeHTML(i.uid)}" aria-current="${i.uid === this.selected}"><span>${escapeHTML(i.name)}</span><small>${inches(i.w)} × ${inches(i.d)} in</small></button></li>`).join('');
+      `<li><button class="piece-row" data-piece="${escapeHTML(i.uid)}" aria-current="${i.uid === this.selected}"><span>${escapeHTML(i.name)}</span><small>${fmtSize(i.w, i.d)}</small></button></li>`).join('');
   }
 
   #renderEditor() {
@@ -509,13 +541,30 @@ export class LayoutEditor {
     ui.editor.hidden = !item || this.readOnly;
     ui.list.querySelectorAll('[data-piece]').forEach((b) => b.setAttribute('aria-current', String(b.dataset.piece === this.selected)));
     if (!item || this.readOnly) return;
+    const cm = inputUnit() === 'cm';
+    for (const input of [ui.w, ui.d, ui.h]) {
+      input.step = cm ? '1' : '0.5';
+      input.min = cm ? '3' : '1';
+      input.max = cm ? (input === ui.h ? '274' : '914') : (input === ui.h ? '108' : '360');
+    }
+    ui.suffixes.forEach((el) => { el.textContent = inputUnit(); });
     if (document.activeElement !== ui.name) ui.name.value = item.name;
-    if (document.activeElement !== ui.w) ui.w.value = inches(item.w);
-    if (document.activeElement !== ui.d) ui.d.value = inches(item.d);
-    if (document.activeElement !== ui.h) ui.h.value = inches(item.h);
+    if (document.activeElement !== ui.w) ui.w.value = toInput(item.w);
+    if (document.activeElement !== ui.d) ui.d.value = toInput(item.d);
+    if (document.activeElement !== ui.h) ui.h.value = toInput(item.h);
     if (document.activeElement !== ui.rot) ui.rot.value = String(Math.round(item.rot));
     ui.h.disabled = isFlat(item);
     ui.swatches.querySelectorAll('[data-color]').forEach((b) => b.setAttribute('aria-pressed', String((b.dataset.color || null) === item.color)));
+    const issues = this.#problems(item);
+    ui.warn.hidden = !issues.length;
+    ui.warn.textContent = issues.length ? `This piece ${issues.join(', ')}.` : '';
+  }
+
+  // What is wrong with where a piece sits (src/fit.js), as short phrases.
+  #problems(item) {
+    if (!this.U || this.U.empty) return [];
+    // Overlaps name the other piece's id for agents; people only need its name.
+    return problems(item, this.items, this.U).map((t) => t.replace(/ \([A-Za-z0-9_-]+\)$/, ''));
   }
 
   #renderBar() {
@@ -524,7 +573,11 @@ export class LayoutEditor {
     ui.bar.classList.toggle('read-only', this.readOnly);
     if (!item) return;
     ui.barName.textContent = item.name;
-    ui.barDims.textContent = `${inches(item.w)} × ${inches(item.d)} × ${inches(item.h)} in${this.readOnly ? '' : ` · ${Math.round(item.rot)}°`}`;
+    ui.barDims.textContent = fmtSize(item.w, item.d, item.h);
+    if (!this.readOnly) ui.barDims.append(Object.assign(document.createElement('span'), { className: 'pb-rot', textContent: ` · ${Math.round(item.rot)}°` }));
+    const issue = this.readOnly ? null : this.#problems(item)[0];
+    ui.barWarn.hidden = !issue;
+    ui.barWarn.textContent = issue ? issue[0].toUpperCase() + issue.slice(1) : '';
   }
 
   toast(text, action, onAction) {

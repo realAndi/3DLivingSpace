@@ -1,70 +1,98 @@
 # 3D Living Space
 
-A to-scale 3D model of a two-bedroom, two-bath apartment (821 sq ft) that anyone
-can furnish, measure, walk through and share. Every design gets its own link, and
-AI agents can design it too through a built-in MCP server.
+Build a to-scale 3D model of your apartment with Claude, furnish it, and share
+it. Every unit gets its own link and its own MCP address: add the address to
+Claude, share your floor plan and photos, and Claude builds the rooms, walls,
+doors, windows, kitchen and baths while you watch. Then furnish it yourself or
+ask Claude to, walk through it, measure anything, and send the link to anyone,
+who can look around and make their own version.
 
 **Live:** https://reallyitsandi.com/3DLivingSpace/
 
-## What it does
+## Using it
 
-- **Dollhouse, Plan and Walk views.** Walk mode has drag-to-look, WASD or arrow
-  keys, tap-the-floor-to-walk, a touch joystick on phones, and a minimap.
-- **Furnish.** Add pieces from a catalog of typical sizes (sofas, beds, tables,
-  rugs and more), then drag, turn, resize and recolor them. Pieces snap flush to
-  walls, and while one is selected, lines show its clearance to the nearest wall,
-  counter or other piece on each side. Keys: R / Shift+R turn 90°, [ and ] turn
-  15°, arrows nudge 1" (Shift for 1'), Delete removes, Esc deselects.
-- **Tape measure, in every view.** Plan measures along the floor and snaps to
-  walls. Dollhouse and Walk measure between any two surfaces, so heights work too.
-- **Share.** The first piece you place saves the design and gives it a link.
-  - The **view link** (`/d/<id>`) is public: anyone can look around and make
-    their own version, but can't change yours. Shared links unfurl with a picture
-    of the plan.
-  - The **edit link** (`/d/<id>#edit=<key>`) changes the design. This browser
-    keeps the keys of the designs it made; use the edit link to keep editing on
-    another device or to hand the design to an AI.
-- **Design with AI.** See below.
+- **Start.** The home page shows the example unit (a 2 bed, 2 bath apartment).
+  *Create new unit* gives you an empty unit; *Work off the example unit* gives
+  you your own copy of the example to furnish.
+- **Build it with Claude.** Each unit's Share tab has its MCP address,
+  `https://reallyitsandi.com/3DLivingSpace/mcp/<unit id>/<key>`. In Claude:
+  Settings → Connectors → Add custom connector, paste it, then share the floor
+  plan (with its printed room sizes) and a few photos of each room and ask
+  Claude to build the unit. The page updates within a few seconds of each change.
+  The address can change that unit and no other; keep it to yourself.
+- **Dollhouse, Plan and Walk views.** Walk is first person: on a computer, click
+  to look around with the mouse (Esc frees the cursor), WASD or the arrow keys
+  to move, Shift to run; on a phone, drag to look, use the pad to move, tap the
+  floor to walk there. Tap or click a door to swing it.
+- **Furnish.** Add pieces from a catalog of typical sizes, drag, turn, resize and
+  recolor them. Pieces snap flush to walls, and a selected piece shows its
+  clearance to the nearest wall, fixture or piece on each side.
+- **Tape measure** in every view: along the floor in Plan, between any two
+  surfaces (heights too) in Dollhouse and Walk.
+- **Units:** Feet & inches, Inches, or Centimeters (Tools tab), per browser.
+- **Share.** The unit's link (`/u/<id>`) is view-only for everyone else, with a
+  *Make your own version* button that copies it. Your browser keeps the edit key
+  of the units it made; the edit link (`/u/<id>#edit=<key>`) works on any device.
 
-## Design with AI (MCP)
+## The MCP tools
 
-The server speaks MCP at `https://reallyitsandi.com/3DLivingSpace/mcp`
-(Streamable HTTP, no sign-in). In Claude: Settings → Connectors → Add custom
-connector, paste that address, then in a chat paste your edit link and ask for
-what you want. Changes show up in any browser that has the design open within a
-few seconds.
+Inches throughout. x runs east (left to right on the plan), z south (top to
+bottom); rotations are degrees clockwise on the plan, 0 meaning a fixture or
+piece faces south.
 
 | Tool | What it does |
 | --- | --- |
-| `get_apartment` | Rooms (outline, size), walls, doors with the floor their swing needs, windows, built-in fixtures |
-| `get_catalog` | Furniture types and default sizes |
-| `create_design` | A new design; returns its edit and view links |
-| `get_design` | Pieces, custom assets and placement problems |
-| `set_design_info` | Title and author |
-| `place_items` / `update_items` / `remove_items` | Place, move, turn, resize, recolor, remove |
-| `create_asset` | A custom 3D piece built from boxes, cylinders, cones and spheres |
+| `get_unit` | Everything about the unit: settings, rooms, walls, doors and windows (which rooms each joins, which way it opens), fixtures, furniture, problems |
+| `get_catalog` | Fixture types and their options, kitchen segments, opening types, room kinds, floors, finishes, furniture |
+| `build_unit` | Lay the unit out from the plan in one call: settings plus whole lists of rooms, walls, openings, fixtures, labels |
+| `edit_unit` | Change rooms, walls, openings or fixtures by id, or remove them |
+| `set_info` | Title and author |
+| `place_items` / `update_items` / `remove_items` | Furniture |
+| `create_asset` | A custom 3D piece from boxes, cylinders, cones and spheres |
 | `find_spots` | Where a footprint fits, optionally against a wall |
-| `check_design` | Clear floor on each side of every piece, and problems |
-| `render_plan` | A labeled top-down picture, for the agent to check its work |
+| `check_unit` | The unit's problems, and each piece's clear floor and problems |
+| `render_plan` | A labeled top-down picture with inch coordinates, to compare with the floor plan |
 
-Units are inches. x runs east (left to right on the plan), z runs south (top to
-bottom), origin at the plan's north-west outside corner. A piece's rotation is
-degrees clockwise on the plan; 0 means its front faces south.
+## How a unit is described
 
-Reading is open; changing a design needs its edit link. Requests are rate
-limited per address.
+A unit (`src/unit.js`) is plain data, so the browser and the server build the
+same thing from it:
 
-## How the apartment was measured
+- **Rooms** are the clear floor inside the walls. Where two rooms are a wall's
+  thickness apart, the gap becomes that wall; where they touch, they are open to
+  each other; every indoor room gets an outside wall around whatever doesn't
+  touch another room. Extra walls (a pier, a half wall) are listed separately.
+  This is what an agent can get right from a floor plan's printed room sizes,
+  and the walls can't come out misaligned.
+- **Doors and windows** are placed by a point in their wall and a width; they
+  find the wall they're in and are cut out of it. Ten types, from hinged doors
+  to sliding glass doors and cased openings.
+- **Fixtures** are built-ins with a center, size and rotation: kitchen runs
+  listed as segments (base, sink, dishwasher, range, fridge…), islands, baths,
+  laundry, closets, fireplaces and more.
+- **Finishes:** wall paint, floors per room, cabinets, counters, backsplash,
+  appliances, hardware, tile.
 
-- Walls, doors and windows are traced from the leasing plan in pixel
-  coordinates (`src/plan.js`). At 25.86 px per foot, the tracing reproduces all
-  three room sizes printed on the plan to within 2".
+Building a unit also checks it: overlapping rooms, walls far too thick (a room
+missing) or slivers (rooms meant to touch), doors not in a wall, fixtures in a
+wall, doors that hit a fixture as they swing, sizes that disagree with the plan.
+Agents get these as sentences to fix.
+
+## How the example was measured
+
+- Walls, doors and windows are traced from the leasing plan in pixel coordinates
+  (`src/example.js`). At 25.86 px per foot the tracing reproduces both
+  bedrooms' printed sizes within 2".
+- Two tape measurements from the living room's window wall (112" to the side of
+  the fridge, about 129½" to the primary bedroom door) both came out about 4"
+  longer than the drawing, so that wall sits 3.9" further east than drawn.
 - Ceiling height (9'0"), window sizes and heights, the kitchen's cabinet order
   and the primary bath's layout come from walkthrough photos: each photo's camera
   position was solved against wall corners and floor and ceiling lines the plan
-  locates, then refined by aligning the model's edges with the photo's. The
-  photos themselves are not published.
-- Bedroom 2 and Bath 2 follow the plan with the same finishes.
+  locates. The photos themselves are not published.
+- The rooms add up to 727 sq ft of clear floor; to the middle of the outside
+  walls the unit is about 811 sq ft, and to their outside face about 857, which
+  brackets the listed 821.
 
 ## Running it
 
@@ -78,24 +106,34 @@ npm test           # starts the server on a scratch database and drives the API 
 
 `BASE_PATH` serves it under a path (production uses `/3DLivingSpace`),
 `LISTEN` takes a port or a Unix socket path, `DATA_DIR` holds the SQLite
-database (`designs.db`, with a daily backup kept for a week), and `PUBLIC_URL`
+database (`units.db`, with a daily backup kept for a week), and `PUBLIC_URL`
 fixes the origin used in links.
+
+### HTTP API
+
+| Route | |
+| --- | --- |
+| `POST api/units` | `{}` for an empty unit, `{from: 'example'}` for a copy of the example, `{from: '<id>'}` for a copy of a unit; returns its key, edit link and MCP address |
+| `GET api/units/:id` | Anyone; `?since=<version>` answers 204 when unchanged; `example` is the example |
+| `PATCH api/units/:id` | `X-Edit-Key`: furniture, title and author (the unit itself changes over MCP) |
+| `POST api/units/:id/fork` | A copy you own |
+| `GET api/units/:id/card.png`, `plan.png`, `api/card.png` | Link preview, labeled plan |
 
 ## Layout
 
 | Path | What it holds |
 | --- | --- |
-| `index.html`, `src/main.js` | The page, scene, views, labels, minimap, panels |
-| `src/plan.js` | Traced walls, openings, rooms |
-| `src/space.js` | The unit as plain data: doorways, wall pieces, fixtures, door swings |
-| `src/catalog.js`, `src/design.js`, `src/fit.js` | Catalog, design format and checks, overlap and clearance math (shared with the server) |
-| `src/architecture.js`, `src/kitchen.js`, `src/baths.js` | The building, kitchen, baths, closets and laundry |
-| `src/furniture.js` | 3D models for catalog pieces and custom assets |
-| `src/layout.js` | Placing, dragging, clearances |
-| `src/sync.js` | Saving, polling, view-only and copies |
-| `src/measure.js` | The tape measure |
-| `src/materials.js`, `src/surroundings.js`, `src/walk.js` | Textures, the view out the windows, first-person controls |
-| `server/` | HTTP server, designs API, MCP tools, plan pictures (`render.js`, IBM Plex fonts under the OFL) |
+| `index.html`, `src/main.js` | The page, scene, views, labels, minimap, panels, home and empty states |
+| `src/unit.js` | The unit model: vocabulary, cleaning, inch conversion, and building walls, openings and fixtures from it |
+| `src/example.js` | The example unit, traced from the leasing plan |
+| `src/geometry.js`, `src/fit.js` | Plane geometry; overlap, clearance and free-spot checks |
+| `src/catalog.js`, `src/design.js` | Furniture catalog; the stored document and its checks |
+| `src/architecture.js`, `src/fixtures.js` | 3D walls, floors, ceilings, doors, windows, railings; kitchens, baths and other built-ins |
+| `src/furniture.js`, `src/layout.js` | 3D furniture and custom pieces; placing, dragging, clearances |
+| `src/sync.js` | Opening, creating, copying and saving units; live updates |
+| `src/measure.js`, `src/walk.js`, `src/units.js` | Tape measure, first-person controls, display units |
+| `src/materials.js`, `src/surroundings.js` | Textures, the view out the windows |
+| `server/` | HTTP server, units API, per-unit MCP servers, plan pictures (`render.js`, IBM Plex fonts under the OFL) |
 
 ## Deploying
 

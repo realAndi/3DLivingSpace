@@ -1,11 +1,20 @@
 const DEG = Math.PI / 180;
 const wrap = (a) => ((a % 360) + 540) % 360 - 180;
 
-// First-person controls: drag to look, WASD / arrows / joystick to move,
-// tap the floor to walk there. Yaw is a compass bearing (0 = plan north).
+// First-person controls. With a mouse, a click locks the pointer and the mouse looks
+// around like a shooter (Esc frees it). On touch, or where the lock is refused, drag to
+// look and tap the floor to walk there. WASD / arrows / joystick move.
+// Yaw is a compass bearing (0 = plan north).
 export class WalkControls {
-  constructor(camera, dom, { isBlocked, pick, onTapDoor, onUserMove }) {
-    Object.assign(this, { camera, dom, isBlocked, pick, onTapDoor, onUserMove });
+  #enabled = false;
+  #overlay = null;
+  #wasLocked = false;
+  #lockPending = false;
+  #lockByPromise = false;
+  #pendingTap = null;
+
+  constructor(camera, dom, { isBlocked, pick, onTapDoor, onUserMove, canLock = () => true, onLockChange }) {
+    Object.assign(this, { camera, dom, isBlocked, pick, onTapDoor, onUserMove, canLock, onLockChange });
     this.x = 0; this.z = 0; this.y = 5.2; this.yaw = 0; this.pitch = 0; this.roll = 0;
     this.enabled = false;
     this.keys = new Set();
@@ -14,9 +23,24 @@ export class WalkControls {
     this.tween = null;
     this.speed = 5.5;
     this.radius = 0.7;
+    this.lookSpeed = 0.12; // degrees per pixel of locked mouse movement at a 70° fov
     camera.rotation.order = 'YXZ';
     this.#bindPointer();
     this.#bindKeys();
+  }
+
+  get enabled() { return this.#enabled; }
+  set enabled(on) {
+    this.#enabled = !!on;
+    if (!on) this.unlock();
+    this.#syncOverlay();
+  }
+
+  // True while the mouse is captured for FPS look.
+  get locked() { return document.pointerLockElement === this.dom; }
+
+  unlock() {
+    if (this.locked) document.exitPointerLock();
   }
 
   setPose({ x, y = this.y, z, yaw = this.yaw, pitch = 0, roll = 0 }, { animate = false, duration = 0.9 } = {}) {
@@ -42,6 +66,7 @@ export class WalkControls {
   // Returns true when the camera moved this frame.
   update(dt) {
     if (!this.enabled) return false;
+    if (this.locked && !this.canLock()) this.unlock();
     if (this.tween) {
       const tw = this.tween;
       tw.t = Math.min(1, tw.t + dt / tw.duration);
@@ -55,10 +80,12 @@ export class WalkControls {
     const k = this.keys;
     if (k.has('KeyW') || k.has('ArrowUp')) fwd += 1;
     if (k.has('KeyS') || k.has('ArrowDown')) fwd -= 1;
-    if (k.has('KeyA')) side -= 1;
-    if (k.has('KeyD')) side += 1;
-    if (k.has('ArrowLeft') || k.has('KeyQ')) turn -= 1;
-    if (k.has('ArrowRight') || k.has('KeyE')) turn += 1;
+    // With the mouse locked it does the turning, so the side arrows strafe like A / D.
+    const strafe = this.locked;
+    if (k.has('KeyA') || (strafe && k.has('ArrowLeft'))) side -= 1;
+    if (k.has('KeyD') || (strafe && k.has('ArrowRight'))) side += 1;
+    if (k.has('KeyQ') || (!strafe && k.has('ArrowLeft'))) turn -= 1;
+    if (k.has('KeyE') || (!strafe && k.has('ArrowRight'))) turn += 1;
     fwd -= this.joy.y; side += this.joy.x;
     const run = k.has('ShiftLeft') || k.has('ShiftRight') ? 1.8 : 1;
     let moved = false;
@@ -93,40 +120,118 @@ export class WalkControls {
     return false;
   }
 
+  // Turns the view by degrees: positive `right` turns right, positive `down` looks down.
+  #look(right, down) {
+    this.yaw += right;
+    this.pitch = Math.max(-85, Math.min(85, this.pitch - down));
+    this.tween = null;
+    this.roll = 0;
+    this.apply();
+    this.onUserMove?.('look');
+  }
+
+  #tapAt(x, y) {
+    const hit = this.pick(x, y);
+    if (hit?.type === 'door') this.onTapDoor?.(hit.id);
+    else if (hit?.type === 'floor') {
+      this.glide = { x: hit.point.x, z: hit.point.z };
+      this.tween = null;
+      this.onUserMove?.();
+    }
+  }
+
+  // Chrome returns a promise and may reject unadjustedMovement (raw, unaccelerated mouse
+  // input), so ask again without it. Safari and Firefox return nothing and answer with
+  // pointerlockchange / pointerlockerror instead.
+  #requestLock() {
+    const ask = (opts) => { try { return this.dom.requestPointerLock(opts); } catch (err) { return Promise.reject(err); } };
+    this.#lockPending = true;
+    const req = ask({ unadjustedMovement: true });
+    this.#lockByPromise = typeof req?.then === 'function';
+    if (!this.#lockByPromise) return;
+    req.catch((err) => {
+      if (err?.name !== 'NotSupportedError') return this.#lockRefused();
+      Promise.resolve(ask()).catch(() => this.#lockRefused());
+    });
+  }
+
+  // The press that asked for the lock falls back to drag to look; a click acts where it landed.
+  #lockRefused() {
+    if (!this.#lockPending) return;
+    this.#lockPending = false;
+    const tap = this.#pendingTap;
+    this.#pendingTap = null;
+    if (tap && this.enabled) this.#tapAt(tap.x, tap.y);
+  }
+
   #bindPointer() {
     const el = this.dom;
+    const coarse = matchMedia('(pointer: coarse)');
     let drag = null;
     el.addEventListener('pointerdown', (e) => {
-      if (!this.enabled || drag) return;
+      if (!this.enabled) return;
+      if (this.locked) {
+        // Locked: a click acts at the crosshair, and only on doors.
+        if (e.button !== 0) return;
+        const r = el.getBoundingClientRect();
+        const hit = this.pick(r.left + r.width / 2, r.top + r.height / 2);
+        if (hit?.type === 'door') this.onTapDoor?.(hit.id);
+        return;
+      }
+      if (drag) return;
       drag = { id: e.pointerId, x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, t: performance.now() };
       el.setPointerCapture(e.pointerId);
+      // A mouse click on a desktop grabs the cursor; until the lock lands (or if it's refused,
+      // as in a sandboxed iframe) the press drags to look.
+      if (e.pointerType === 'mouse' && e.button === 0 && !coarse.matches && el.requestPointerLock && this.canLock()) {
+        drag.locking = true;
+        this.#requestLock();
+      }
     });
     el.addEventListener('pointermove', (e) => {
       if (!drag || e.pointerId !== drag.id) return;
+      // Like moving a camera: drag right to turn right, down to look down.
       const degPerPx = this.camera.fov / el.clientHeight;
-      this.yaw -= (e.clientX - drag.x) * degPerPx;
-      this.pitch = Math.max(-80, Math.min(80, this.pitch + (e.clientY - drag.y) * degPerPx));
+      this.#look((e.clientX - drag.x) * degPerPx, (e.clientY - drag.y) * degPerPx);
       drag.x = e.clientX; drag.y = e.clientY;
-      this.tween = null;
-      this.roll = 0;
-      this.apply();
-      this.onUserMove?.('look');
     });
     const end = (e) => {
       if (!drag || e.pointerId !== drag.id) return;
       const tap = Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy) < 7 && performance.now() - drag.t < 450;
+      const { locking } = drag;
       drag = null;
       if (!tap || e.type === 'pointercancel') return;
-      const hit = this.pick(e.clientX, e.clientY);
-      if (hit?.type === 'door') this.onTapDoor?.(hit.id);
-      else if (hit?.type === 'floor') {
-        this.glide = { x: hit.point.x, z: hit.point.z };
-        this.tween = null;
-        this.onUserMove?.();
-      }
+      // The click that asks for the lock does nothing else, unless the lock is refused.
+      if (locking && this.#lockPending) this.#pendingTap = { x: e.clientX, y: e.clientY };
+      else this.#tapAt(e.clientX, e.clientY);
     };
     el.addEventListener('pointerup', end);
     el.addEventListener('pointercancel', end);
+    // Locked, the mouse reports movement (in pixels, or raw counts with unadjustedMovement) and no position.
+    document.addEventListener('mousemove', (e) => {
+      if (!this.enabled || !this.locked) return;
+      const dx = e.movementX, dy = e.movementY;
+      // Some browsers report one wild jump right after locking.
+      if (Math.abs(dx) > 400 || Math.abs(dy) > 400) return;
+      const degPerPx = (this.lookSpeed * this.camera.fov) / 70;
+      if (dx || dy) this.#look(dx * degPerPx, dy * degPerPx);
+    });
+    document.addEventListener('pointerlockchange', () => {
+      const locked = this.locked;
+      this.#lockPending = false;
+      this.#pendingTap = null;
+      if (locked) {
+        if (drag) { try { el.releasePointerCapture(drag.id); } catch {} drag = null; }
+        // Walk was switched off while the lock was on its way.
+        if (!this.enabled) { document.exitPointerLock(); return; }
+      }
+      this.#syncOverlay();
+      if (locked !== this.#wasLocked) {
+        this.#wasLocked = locked;
+        this.onLockChange?.(locked);
+      }
+    });
+    document.addEventListener('pointerlockerror', () => { if (!this.#lockByPromise) this.#lockRefused(); });
     el.addEventListener('wheel', (e) => {
       if (!this.enabled) return;
       e.preventDefault();
@@ -144,7 +249,15 @@ export class WalkControls {
       if (/^(Key[WASDQE]|Arrow\w+|Shift\w+)$/.test(e.code)) { this.keys.add(e.code); this.tween = null; e.preventDefault(); }
     });
     addEventListener('keyup', (e) => this.keys.delete(e.code));
-    addEventListener('blur', () => this.keys.clear());
+    addEventListener('blur', () => { this.keys.clear(); this.unlock(); });
+    document.addEventListener('visibilitychange', () => { if (document.hidden) this.unlock(); });
+  }
+
+  // Crosshair and the Esc reminder, shown only while the mouse is locked in Walk.
+  #syncOverlay() {
+    const show = this.enabled && this.locked;
+    if (!this.#overlay && show) this.#overlay = makeOverlay(this.dom.parentElement || document.body);
+    for (const node of this.#overlay || []) node.hidden = !show;
   }
 
   // On-screen joystick for touch screens.
@@ -175,4 +288,16 @@ export class WalkControls {
   get active() {
     return !!(this.tween || this.glide || this.keys.size || this.joy.x || this.joy.y);
   }
+}
+
+// Crosshair and "Esc" pill while the cursor is locked (styled in index.html).
+function makeOverlay(parent) {
+  const cross = document.createElement('div');
+  cross.className = 'walk-crosshair';
+  cross.setAttribute('aria-hidden', 'true');
+  const pill = document.createElement('div');
+  pill.className = 'walk-lock-pill';
+  pill.innerHTML = '<kbd>Esc</kbd> to free the cursor';
+  parent.append(cross, pill);
+  return [cross, pill];
 }

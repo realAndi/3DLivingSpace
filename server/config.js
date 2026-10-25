@@ -13,5 +13,7 @@ export function loadConfig(env = process.env) {
     dataDir: env.DATA_DIR ?? fileURLToPath(new URL('../data', import.meta.url)),
     root: fileURLToPath(new URL('..', import.meta.url)),
     bodyBytes: 600_000,
+    // MCP requests: build_unit can carry a whole unit.
+    mcpBytes: 400_000,
   };
 }

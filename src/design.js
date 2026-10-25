@@ -1,9 +1,10 @@
-// A design: one person's furnished version of the unit. Shared by the browser
-// and the server, which both run everything through these checks.
+// A design document: one person's unit (src/unit.js), the furniture placed in
+// it and the custom pieces made for it. Shared by the browser and the server,
+// which both run everything through these checks.
 //
 // Placed items are in feet: x and z are the footprint's center (x east, z
-// south, origin at the plan's north-west corner), w/d/h are width, depth and
-// height, rot is degrees clockwise on the plan with 0 facing south.
+// south, in the unit's own coordinates), w/d/h are width, depth and height,
+// rot is degrees clockwise on the plan with 0 facing south.
 //
 // Assets are custom 3D pieces built from primitives, usually by an AI through
 // the MCP server. Their parts are in inches, in the piece's own frame: origin
@@ -11,6 +12,7 @@
 // face it, +y up, +z toward its front.
 
 import { catalogByType, swatchKeys } from './catalog.js';
+import { cleanUnit } from './unit.js';
 
 export const LIMITS = { items: 150, assets: 40, parts: 120, title: 60, author: 40, name: 40, description: 200, partInches: 240 };
 export const SHAPES = ['box', 'cylinder', 'cone', 'sphere'];
@@ -107,7 +109,7 @@ export function cleanItem(raw, assets = {}) {
     type: asset ? 'asset' : raw.type,
     name: text(raw.name, LIMITS.name) || base.name,
     w: r3(num(raw.w, 0.1, 30, base.w)), d: r3(num(raw.d, 0.1, 30, base.d)), h: r3(num(raw.h, 0.02, 9, base.h)),
-    x: r3(num(raw.x, -5, 45, 20)), z: r3(num(raw.z, -5, 35, 15)),
+    x: r3(num(raw.x, -200, 400, 10)), z: r3(num(raw.z, -200, 400, 10)),
     rot: r3((((num(raw.rot, -3600, 3600, 0)) % 360) + 360) % 360),
     color: cleanColor(raw.color),
   };
@@ -115,7 +117,7 @@ export function cleanItem(raw, assets = {}) {
   return item;
 }
 
-// A whole design document: { title, author, items, assets }.
+// A whole design document: { title, author, unit, items, assets }.
 export function cleanDesign(raw = {}) {
   const assets = {};
   for (const a of (Array.isArray(raw.assets) ? raw.assets : Object.values(raw.assets ?? {})).slice(0, LIMITS.assets)) {
@@ -130,5 +132,5 @@ export function cleanDesign(raw = {}) {
     seen.add(clean.uid);
     items.push(clean);
   }
-  return { title: text(raw.title, LIMITS.title), author: text(raw.author, LIMITS.author), items, assets: Object.values(assets) };
+  return { title: text(raw.title, LIMITS.title), author: text(raw.author, LIMITS.author), unit: cleanUnit(raw.unit ?? {}).unit, items, assets: Object.values(assets) };
 }

@@ -1,18 +1,34 @@
-// End-to-end: start the server on a scratch database, then use the API and the
-// MCP tools the way the browser and an agent do.
+// End-to-end: start the server on a scratch data directory, then use the API
+// the way the browser does and a unit's own MCP server the way an agent does.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { DatabaseSync } from 'node:sqlite';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { EXAMPLE_TITLE } from '../src/example.js';
 
 const port = 18000 + Math.floor(Math.random() * 1000);
 const B = `http://localhost:${port}/3DLivingSpace`;
 const dataDir = mkdtempSync(join(tmpdir(), '3dls-'));
 let server;
 
+// A design saved before units existed: furniture in the one apartment.
+const LEGACY = { id: 'legacy0001', key: 'LegacyKey0123456789abcdefgh' };
+function oldDesigns() {
+  const db = new DatabaseSync(join(dataDir, 'designs.db'));
+  db.exec(`CREATE TABLE designs (id TEXT PRIMARY KEY, key_hash TEXT NOT NULL, title TEXT NOT NULL DEFAULT '', author TEXT NOT NULL DEFAULT '',
+    doc TEXT NOT NULL, version INTEGER NOT NULL DEFAULT 1, forked_from TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`);
+  db.prepare('INSERT INTO designs VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(LEGACY.id, createHash('sha256').update(LEGACY.key).digest('hex'), 'Old one', 'Lee',
+    JSON.stringify({ items: [{ uid: 'bed00001', type: 'bed-queen', x: 30, z: 4.3 }], assets: [] }), 4, null, 1, 2);
+  db.prepare('INSERT INTO designs VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run('broken0001', 'x', '', '', 'not json', 1, null, 1, 1);
+  db.close();
+}
+
 before(async () => {
+  oldDesigns();
   server = spawn(process.execPath, ['server/index.js'], {
     env: { ...process.env, PORT: String(port), BASE_PATH: '/3DLivingSpace', DATA_DIR: dataDir, PUBLIC_URL: '' },
     stdio: ['ignore', 'ignore', 'inherit'],
@@ -28,104 +44,308 @@ after(() => { server.kill(); rmSync(dataDir, { recursive: true, force: true }); 
 const api = (path, { method = 'GET', body, key } = {}) => fetch(`${B}/${path}`, {
   method, headers: { 'Content-Type': 'application/json', ...(key ? { 'X-Edit-Key': key } : {}) }, body: body ? JSON.stringify(body) : undefined,
 });
+const create = async (body = {}) => {
+  const res = await api('api/units', { method: 'POST', body });
+  assert.equal(res.status, 201);
+  return res.json();
+};
+const isPng = (buf) => buf.subarray(1, 4).toString() === 'PNG';
+const pngSize = (buf) => [buf.readUInt32BE(16), buf.readUInt32BE(20)];
 
-async function mcp(method, params = {}) {
-  const res = await fetch(`${B}/mcp`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' },
-    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
-  });
-  assert.equal(res.status, 200, await res.clone().text());
-  return (await res.json()).result;
+// A unit's MCP server, at its own address.
+function mcpAt(url) {
+  const post = (body) => fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' }, body: JSON.stringify(body) });
+  async function rpc(method, params = {}) {
+    const res = await post({ jsonrpc: '2.0', id: 1, method, params });
+    assert.equal(res.status, 200, await res.clone().text());
+    const reply = await res.json();
+    assert.equal(reply.error, undefined, JSON.stringify(reply.error));
+    return reply.result;
+  }
+  async function call(name, args = {}) {
+    const r = await rpc('tools/call', { name, arguments: args });
+    const text = r.content.find((c) => c.type === 'text')?.text;
+    let data = null;
+    if (!r.isError && text?.startsWith('{')) data = JSON.parse(text);
+    return { ...r, data, text };
+  }
+  return { rpc, call };
 }
-const call = async (name, args = {}) => {
-  const r = await mcp('tools/call', { name, arguments: args });
-  return { ...r, data: r.content[0].type === 'text' ? JSON.parse(r.content[0].text.startsWith('{') ? r.content[0].text : 'null') : null, text: r.content.find((c) => c.type === 'text')?.text };
+
+// A small unit in inches: a living room with a kitchen along its west wall and
+// a bath to the east, a door between them, an entry door and a window. The
+// kitchen run and the toilet stand a few inches off their walls on purpose.
+const SMALL = {
+  name: 'Test flat', beds: 0, baths: 1, ceiling_height: 108, door_height: 80,
+  rooms: [
+    { id: 'living', name: 'Living', kind: 'living', outline: [[8, 8], [152, 8], [152, 188], [8, 188]] },
+    { id: 'bath', name: 'Bath', kind: 'bath', outline: [[156.5, 8], [216.5, 8], [216.5, 104], [156.5, 104]] },
+  ],
+  openings: [
+    { id: 'entry', type: 'entry', at: [80, 192], width: 36 },
+    { id: 'bath-door', type: 'door', at: [154.25, 40], width: 28, hinge: 'north', opens: 'east' },
+    { id: 'win-living', type: 'window', at: [80, 4], width: 60 },
+  ],
+  fixtures: [
+    { id: 'kitchen', type: 'kitchen-run', at: [23.75, 90], width: 132, rotation: 270, segments: ['fridge', 'sink', { kind: 'dishwasher' }, { kind: 'range', width: 30 }], hood: 'hood' },
+    { id: 'toilet', type: 'toilet', at: [200, 80], rotation: 90 },
+  ],
 };
 
-test('designs: create, read, change with the key only, poll, copy', async () => {
-  const res = await api('api/designs', { method: 'POST', body: { title: 'Mine', items: [{ type: 'sofa', x: 30, z: 14 }] } });
-  assert.equal(res.status, 201);
-  const d = await res.json();
-  assert.match(d.editUrl, /\/d\/\w+#edit=\w+$/);
-  assert.equal(d.items.length, 1);
+test('units: create empty, change furniture with the key only, poll, copy', async () => {
+  const u = await create({ title: 'Mine' });
+  assert.equal(u.unit.rooms.length, 0);
+  assert.equal(u.version, 1);
+  assert.equal(u.unitRev, 1);
+  assert.equal(u.url, `${B}/u/${u.id}`);
+  assert.equal(u.editUrl, `${B}/u/${u.id}#edit=${u.key}`);
+  assert.equal(u.mcpUrl, `${B}/mcp/${u.id}/${u.key}`);
+  assert.equal(u.forkedFrom, null);
 
-  const wrong = await api(`api/designs/${d.id}`, { method: 'PATCH', key: 'x'.repeat(28), body: { remove: [d.items[0].uid] } });
+  const wrong = await api(`api/units/${u.id}`, { method: 'PATCH', key: 'x'.repeat(28), body: { upsert: [{ type: 'sofa', x: 5, z: 5 }] } });
   assert.equal(wrong.status, 403);
+  assert.match((await wrong.json()).error, /key/);
+  assert.equal((await api(`api/units/${u.id}`, { method: 'PATCH', body: {} })).status, 403, 'no key');
 
-  const ok = await api(`api/designs/${d.id}`, { method: 'PATCH', key: d.key, body: { title: 'Mine, v2', upsert: [{ uid: 'bed00001', type: 'bed-queen', x: 30.13, z: 4.32 }] } });
+  // The browser changes furniture and the title; a unit sent along is ignored.
+  const ok = await api(`api/units/${u.id}`, { method: 'PATCH', key: u.key, body: {
+    baseVersion: 1, title: 'Mine, v2', upsert: [{ uid: 'sofa0001', type: 'sofa', x: 6, z: 8 }],
+    unit: { rooms: [{ id: 'r', kind: 'living', poly: [[0, 0], [10, 0], [10, 10], [0, 10]] }] },
+  } });
   assert.equal(ok.status, 200);
-  const { version } = await ok.json();
-  assert.equal(version, 2);
+  const saved = await ok.json();
+  assert.deepEqual([saved.version, saved.unitRev, saved.design], [2, 1, undefined]);
 
-  assert.equal((await api(`api/designs/${d.id}?since=2`)).status, 204);
-  const read = await (await api(`api/designs/${d.id}?since=1`)).json();
+  assert.equal((await api(`api/units/${u.id}?since=2`)).status, 204);
+  const read = await (await api(`api/units/${u.id}?since=1`)).json();
   assert.equal(read.title, 'Mine, v2');
-  assert.equal(read.items.length, 2);
+  assert.equal(read.items.length, 1);
+  assert.equal(read.unit.rooms.length, 0, 'the browser never changes the unit');
   assert.equal(read.key, undefined, 'the key never comes back from a read');
 
-  const bad = await api(`api/designs/${d.id}`, { method: 'PATCH', key: d.key, body: { upsert: [{ type: 'spaceship', x: 1, z: 1 }] } });
-  assert.equal(bad.status, 400);
+  // Someone else wrote since version 1: the reply brings the whole unit.
+  const behind = await (await api(`api/units/${u.id}`, { method: 'PATCH', key: u.key, body: { baseVersion: 1, remove: ['nothing0'] } })).json();
+  assert.equal(behind.version, 3);
+  assert.equal(behind.design.items.length, 1);
 
-  const copy = await (await api(`api/designs/${d.id}/fork`, { method: 'POST', body: {} })).json();
-  assert.notEqual(copy.id, d.id);
-  assert.equal(copy.items.length, 2);
-  assert.equal(copy.forkedFrom, d.id);
+  const bad = await api(`api/units/${u.id}`, { method: 'PATCH', key: u.key, body: { upsert: [{ type: 'spaceship', x: 1, z: 1 }] } });
+  assert.equal(bad.status, 400);
+  assert.equal((await api(`api/units/${u.id}`, { method: 'PATCH', key: u.key, body: [] })).status, 400);
+
+  const copy = await (await api(`api/units/${u.id}/fork`, { method: 'POST', body: {} })).json();
+  assert.notEqual(copy.id, u.id);
+  assert.notEqual(copy.key, u.key);
+  assert.equal(copy.items.length, 1);
+  assert.equal(copy.forkedFrom, u.id);
+  assert.equal(copy.title, 'Mine, v2 (my version)');
+  const copy2 = await create({ from: u.id, author: 'Ana' });
+  assert.deepEqual([copy2.items.length, copy2.forkedFrom, copy2.author], [1, u.id, 'Ana']);
+
+  assert.equal((await api('api/units/nope12345')).status, 404);
+  assert.equal((await api('api/units', { method: 'POST', body: { from: 'nope12345' } })).status, 404);
+});
+
+test('the example unit: read-only, copied without furniture', async () => {
+  const ex = await (await api('api/units/example')).json();
+  assert.deepEqual([ex.id, ex.version, ex.unitRev, ex.title], ['example', 1, 1, EXAMPLE_TITLE]);
+  assert.equal(ex.unit.rooms.length, 10);
+  assert.equal(ex.items.length, 0);
+  assert.equal((await api('api/units/example?since=1')).status, 204);
+  assert.equal((await api('api/units/example', { method: 'PATCH', key: 'x'.repeat(28), body: { title: 'Mine now' } })).status, 403);
+
+  const mine = await create({ from: 'example', title: 'My copy' });
+  assert.deepEqual([mine.unit.rooms.length, mine.items.length, mine.forkedFrom, mine.title], [10, 0, 'example', 'My copy']);
+  assert.deepEqual(mine.unit, ex.unit);
+  const fork = await (await api('api/units/example/fork', { method: 'POST', body: {} })).json();
+  assert.deepEqual([fork.unit.rooms.length, fork.forkedFrom, fork.title], [10, 'example', '']);
+});
+
+test('designs from before units are units of the example, same links and keys', async () => {
+  const old = await (await api(`api/units/${LEGACY.id}`)).json();
+  assert.deepEqual([old.title, old.author, old.version, old.unitRev, old.items.length, old.unit.rooms.length], ['Old one', 'Lee', 4, 1, 1, 10]);
+  const res = await api(`api/units/${LEGACY.id}`, { method: 'PATCH', key: LEGACY.key, body: { title: 'Old one, moved' } });
+  assert.equal(res.status, 200);
+  assert.equal((await api('api/units/broken0001')).status, 404);
 });
 
 test('pages and pictures', async () => {
-  const d = await (await api('api/designs', { method: 'POST', body: { title: 'Cozy <corner>', author: 'Sam' } })).json();
-  const html = await (await fetch(`${B}/d/${d.id}`)).text();
+  const home = await (await fetch(`${B}/`)).text();
+  assert.match(home, /<base href="\/3DLivingSpace\/">/);
+  assert.match(home, /og:title" content="3D Living Space"/);
+  assert.match(home, /og:image" content="http:\/\/localhost:\d+\/3DLivingSpace\/api\/card.png"/);
+
+  const u = await create({ from: 'example', title: 'Cozy <corner>', author: 'Sam' });
+  const html = await (await fetch(`${B}/u/${u.id}`)).text();
   assert.match(html, /<base href="\/3DLivingSpace\/">/);
   assert.match(html, /og:title" content="Cozy &lt;corner&gt; · 3D Living Space"/);
-  assert.match(html, new RegExp(`api/designs/${d.id}/card.png\\?v=1`));
-  assert.equal((await fetch(`${B}/d/nope12345`)).status, 404);
-  const png = Buffer.from(await (await fetch(`${B}/api/designs/${d.id}/card.png`)).arrayBuffer());
-  assert.equal(png.subarray(1, 4).toString(), 'PNG');
-  assert.equal((await fetch(`${B}/src/main.js`)).headers.get('content-type'), 'text/javascript; charset=utf-8');
+  assert.match(html, /og:description" content="Sam&#39;s apartment in 3D \(2 bed, 2 bath, 821 sq ft, 0 pieces\)/);
+  assert.match(html, new RegExp(`api/units/${u.id}/card.png\\?v=1`));
+  assert.match(await (await fetch(`${B}/u/example`)).text(), new RegExp(`og:title" content="${EXAMPLE_TITLE} · 3D Living Space"`));
+  assert.equal((await fetch(`${B}/u/nope12345`)).status, 404);
+  const old = await fetch(`${B}/d/${u.id}`, { redirect: 'manual' });
+  assert.deepEqual([old.status, old.headers.get('location')], [301, `/3DLivingSpace/u/${u.id}`]);
+
+  assert.equal((await fetch(`${B}/src/unit.js`)).headers.get('content-type'), 'text/javascript; charset=utf-8');
   assert.equal((await fetch(`${B}/src/../server/index.js`)).status, 404);
+
+  const empty = await create();
+  for (const path of ['api/card.png', `api/units/${u.id}/card.png`, `api/units/${u.id}/plan.png`, 'api/units/example/plan.png', `api/units/${empty.id}/card.png`, `api/units/${empty.id}/plan.png`]) {
+    const res = await fetch(`${B}/${path}`);
+    assert.equal(res.status, 200, path);
+    const buf = Buffer.from(await res.arrayBuffer());
+    assert.ok(isPng(buf), path);
+    if (path.endsWith('card.png')) assert.deepEqual(pngSize(buf), [1200, 630], path);
+  }
 });
 
-test('MCP: an agent furnishes a design', async () => {
-  const init = await mcp('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'test', version: '1' } });
+test('MCP: one address per unit', async () => {
+  const u = await create();
+  const post = (url, method = 'POST') => fetch(url, { method, headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' }, body: method === 'POST' ? JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }) : undefined });
+  for (const url of [`${B}/mcp/${u.id}/${'x'.repeat(28)}`, `${B}/mcp/nope12345/${u.key}`, `${B}/mcp`, `${B}/mcp/${u.id}`, `${B}/mcp/example/${u.key}`]) {
+    const res = await post(url);
+    assert.equal(res.status, 404, url);
+    assert.match((await res.json()).error.message, /Share tab/, url);
+  }
+  assert.equal((await post(u.mcpUrl, 'GET')).status, 405);
+
+  const { rpc } = mcpAt(u.mcpUrl);
+  const init = await rpc('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'test', version: '1' } });
   assert.equal(init.serverInfo.name, '3d-living-space');
-  const tools = (await mcp('tools/list')).tools.map((t) => t.name);
-  for (const t of ['get_apartment', 'get_catalog', 'create_design', 'get_design', 'place_items', 'update_items', 'remove_items', 'create_asset', 'find_spots', 'check_design', 'render_plan', 'set_design_info']) assert.ok(tools.includes(t), t);
+  assert.match(init.instructions, /This connection belongs to one unit/);
+  const tools = (await rpc('tools/list')).tools;
+  for (const t of ['get_unit', 'build_unit', 'edit_unit', 'get_catalog', 'set_info', 'place_items', 'update_items', 'remove_items', 'create_asset', 'find_spots', 'check_unit', 'render_plan']) {
+    const tool = tools.find((x) => x.name === t);
+    assert.ok(tool, t);
+    assert.equal(tool.inputSchema.properties?.unit, undefined, `${t} takes no unit`);
+  }
+});
 
-  const apt = (await call('get_apartment')).data;
-  assert.equal(apt.units, 'inches');
-  assert.ok(apt.rooms.find((r) => r.id === 'primary'));
+test('MCP: an agent builds a unit from a plan, fixes it and furnishes it', async () => {
+  const u = await create();
+  const { call } = mcpAt(u.mcpUrl);
 
-  const made = (await call('create_design', { title: 'Agent made', author: 'Claude' })).data;
-  const ref = made.edit_url;
+  const empty = (await call('get_unit')).data;
+  assert.equal(empty.status, 'empty');
+  assert.match(empty.next_steps, /floor plan/);
 
-  const denied = await call('place_items', { design: made.view_url, items: [{ type: 'sofa', x: 372, z: 168 }] });
-  assert.equal(denied.isError, true);
+  const catalog = (await call('get_catalog')).data;
+  assert.ok(catalog.fixtures.find((f) => f.type === 'kitchen-run').options.includes('segments'));
+  assert.ok(catalog.kitchen_segments.find((s) => s.kind === 'sink').width > 0);
+  assert.ok(catalog.furniture.find((f) => f.type === 'sofa'));
 
-  const spots = (await call('find_spots', { design: ref, width: 64, depth: 86, room: 'primary' })).data.spots;
+  // Build it.
+  const built = (await call('build_unit', SMALL)).data;
+  assert.deepEqual(built.counts, { rooms: 2, walls: 0, doors: 2, windows: 1, doorways: 0, fixtures: 2, labels: 0 });
+  assert.deepEqual(built.rooms.map((r) => r.size), [[144, 180], [60, 96]]);
+  assert.deepEqual(built.dropped, []);
+  assert.deepEqual(built.problems, []);
+  // Both stood off their walls: they were slid back flush.
+  const moved = Object.fromEntries(built.moved.map((m) => [m.id, m.to]));
+  assert.deepEqual(moved, { kitchen: [20.75, 90], toilet: [202.5, 80] });
+
+  // The browser sees a new unitRev and the rooms.
+  const view = await (await api(`api/units/${u.id}`)).json();
+  assert.deepEqual([view.unitRev, view.unit.rooms.length, view.unit.name], [2, 2, 'Test flat']);
+
+  const got = (await call('get_unit')).data;
+  assert.equal(got.status, 'built');
+  assert.equal(got.settings.baths, 1);
+  const door = got.openings.find((o) => o.id === 'bath-door');
+  assert.deepEqual([door.joins, door.opens, door.opens_into, door.hinge, door.wall_thickness], [['living', 'bath'], 'east', 'bath', 'north', 4.5]);
+  assert.deepEqual(got.openings.find((o) => o.id === 'entry').joins, ['living', 'outside']);
+  const kitchen = got.fixtures.find((f) => f.id === 'kitchen');
+  assert.deepEqual(kitchen.segments.map((s) => s.kind), ['fridge', 'sink', 'dishwasher', 'range']);
+  assert.equal(kitchen.hood, 'hood');
+  assert.ok(kitchen.against_wall.includes('back'));
+  assert.equal(got.fixtures.find((f) => f.id === 'toilet').room, 'bath');
+
+  // Move a door, take out a fixture, add one with snap: false.
+  const edited = (await call('edit_unit', {
+    openings: [{ id: 'bath-door', at: [154.25, 70] }],
+    fixtures: [{ id: 'vanity', type: 'vanity', at: [186, 20], rotation: 0, snap: false }],
+    remove: ['toilet', 'ghost'],
+  })).data;
+  assert.deepEqual(edited.removed, ['fixture toilet']);
+  assert.equal(edited.not_found.length, 1);
+  assert.deepEqual(edited.moved, []);
+  const after = (await call('get_unit')).data;
+  assert.deepEqual(after.openings.find((o) => o.id === 'bath-door').at, [154.25, 70]);
+  assert.deepEqual(after.fixtures.map((f) => [f.id, f.at]), [['kitchen', [20.75, 90]], ['vanity', [186, 20]]]);
+
+  // Problems come back: overlapping rooms, a door in no wall, a room that can't be used.
+  const broken = (await call('edit_unit', {
+    rooms: [{ id: 'nook', name: 'Nook', kind: 'other', outline: [[100, 8], [180, 8], [180, 60], [100, 60]] }, { id: 'flat', name: 'Flat', kind: 'other', outline: [[0, 0], [10, 0], [20, 0]] }],
+    openings: [{ id: 'lost', type: 'door', at: [80, 100], width: 30 }],
+    fixtures: [{ id: 'cab', type: 'base-cabinet', at: [170, 80], snap: false }],
+  })).data;
+  assert.ok(broken.problems.some((p) => /bath-door\) hits cab/.test(p)), broken.problems.join('\n'));
+  assert.ok(broken.problems.some((p) => /overlap/.test(p)), broken.problems.join('\n'));
+  assert.ok(broken.problems.some((p) => /lost .*isn't in a wall/.test(p)), broken.problems.join('\n'));
+  assert.ok(broken.dropped.some((d) => /Flat/.test(d)));
+  const fixed = (await call('edit_unit', { remove: ['nook', 'lost', 'cab'] })).data;
+  assert.deepEqual(fixed.problems, []);
+
+  // A schema error is an error, not a crash.
+  const nonsense = await call('build_unit', { rooms: [{ id: 'x', name: 'X', kind: 'ballroom', outline: [[0, 0], [1, 0], [1, 1]] }] });
+  assert.equal(nonsense.isError, true);
+
+  // Furnish it.
+  const unitRev = (await (await api(`api/units/${u.id}`)).json()).unitRev;
+  const spots = (await call('find_spots', { width: 84, depth: 36, room: 'living' })).data.spots;
   assert.ok(spots.length > 0);
-  const placed = (await call('place_items', { design: ref, items: [{ type: 'bed-queen', x: spots[0].x, z: spots[0].z, rotation: spots[0].rotation }, { type: 'sofa', x: 10, z: 10 }] })).data;
+  const placed = (await call('place_items', { items: [
+    { type: 'sofa', at: spots[0].at, rotation: spots[0].rotation },
+    { type: 'bed-queen', at: [186, 60] },
+  ] })).data;
   assert.equal(placed.placed.length, 2);
-  assert.ok(placed.problems.some((p) => p.name === 'Sofa'), 'a sofa dropped into the corner walls is flagged');
+  assert.equal(placed.placed[0].room, 'living');
+  assert.ok(!placed.problems.some((p) => p.startsWith('Sofa')), placed.problems.join('\n'));
+  assert.ok(placed.problems.some((p) => p.startsWith('Queen bed')), 'a queen bed in the bath is flagged');
+  const bed = placed.placed[1];
+  assert.equal((await call('update_items', { items: [{ id: bed.id, at: [80, 100], rotation: 90 }] })).data.updated[0].room, 'living');
+  assert.equal((await call('place_items', { items: [{ type: 'spaceship', at: [1, 1] }] })).isError, true);
 
-  const asset = (await call('create_asset', { design: ref, name: 'Bar stool', parts: [
+  const asset = (await call('create_asset', { name: 'Bar stool', parts: [
     { shape: 'cylinder', size: [14, 1.5, 14], at: [0, 29, 0], color: '#8a6a4a', finish: 'wood' },
     { shape: 'cylinder', size: [2, 28, 2], at: [0, 14, 0], color: '#222222', finish: 'metal' },
   ] })).data;
   assert.equal(asset.height, 29.75);
-  const stool = (await call('place_items', { design: ref, items: [{ type: asset.place_as, x: 300, z: 220 }] })).data.placed[0];
+  const stool = (await call('place_items', { items: [{ type: asset.place_as, at: [60, 60] }] })).data.placed[0];
   assert.equal(stool.type, `asset:${asset.asset_id}`);
 
-  await call('update_items', { design: ref, items: [{ id: stool.id, x: 310, rotation: 45 }] });
-  const check = (await call('check_design', { design: ref })).data;
+  const check = (await call('check_unit')).data;
   assert.equal(check.pieces.length, 3);
+  assert.deepEqual(check.unit_problems, []);
+  assert.ok(check.pieces.find((p) => p.name === 'Sofa').clear_floor);
 
-  const pic = await call('render_plan', { design: ref });
+  const pic = await call('render_plan');
   assert.equal(pic.content[0].type, 'image');
+  const buf = Buffer.from(pic.content[0].data, 'base64');
+  assert.ok(isPng(buf));
+  assert.ok(pngSize(buf)[0] >= 900);
+  assert.match(pic.text, new RegExp(`/u/${u.id}`));
 
-  const removed = (await call('remove_items', { design: ref, ids: [stool.id] })).data;
+  const removed = (await call('remove_items', { ids: [stool.id] })).data;
   assert.equal(removed.remaining, 2);
-  const got = (await call('get_design', { design: made.view_url })).data;
-  assert.equal(got.items.length, 2);
-  assert.equal(got.assets.length, 1);
+  assert.equal((await call('set_info', { title: 'Agent made', author: 'Claude' })).data.title, 'Agent made');
+
+  const final = await (await api(`api/units/${u.id}`)).json();
+  assert.deepEqual([final.title, final.author, final.items.length, final.assets.length], ['Agent made', 'Claude', 2, 1]);
+  assert.equal(final.unitRev, unitRev, 'furniture never bumps unitRev');
+  const got2 = (await call('get_unit')).data;
+  assert.equal(got2.furniture.length, 2);
+  assert.equal(got2.assets[0].place_as, asset.place_as);
+});
+
+test('MCP: editing part of a copy of the example keeps the rest', async () => {
+  const u = await create({ from: 'example' });
+  const { call } = mcpAt(u.mcpUrl);
+  const res = (await call('edit_unit', { rooms: [{ id: 'living', name: 'Great Room' }], openings: [{ id: 'win-living', width: 80 }] })).data;
+  assert.deepEqual(res.dropped, []);
+  const { unit } = await (await api(`api/units/${u.id}`)).json();
+  const room = unit.rooms.find((r) => r.id === 'living'), win = unit.openings.find((o) => o.id === 'win-living');
+  assert.equal(room.name, 'Great Room');
+  assert.ok(room.view, 'the walk-mode view stays');
+  assert.deepEqual([Math.round(win.width * 12), win.mullions], [80, [0.577]]);
+  assert.equal(unit.fixtures.length, 16);
 });

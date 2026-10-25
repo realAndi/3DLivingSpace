@@ -2,7 +2,7 @@
   "name": "3dlivingspace",
   "version": "1.0.0",
   "private": true,
-  "description": "A to-scale 3D model of a 2 bed / 2 bath apartment that anyone can furnish, with an MCP server so AI agents can design it too.",
+  "description": "To-scale 3D models of people's apartments, built from their floor plans by an AI agent through each unit's own MCP server, then furnished and shared.",
   "license": "MIT",
   "type": "module",
   "engines": {

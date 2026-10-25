@@ -1,8 +1,10 @@
-// The app's files, and its one page with link-preview tags filled in: a design's
-// own title and plan picture on /d/<id>, so a shared link unfurls as that design.
+// The app's files, and its one page with link-preview tags filled in: the
+// home page, and each unit's own title, summary and card on /u/<id>, so a
+// shared link unfurls as that unit.
 import { readFile, stat } from 'node:fs/promises';
 import { join, normalize, extname, sep } from 'node:path';
 import { send } from './http.js';
+import { facts } from './render.js';
 
 const TYPES = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.json': 'application/json',
@@ -10,7 +12,7 @@ const TYPES = {
 };
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
-export function createPages(config, designs) {
+export function createPages(config, units) {
   const indexPath = join(config.root, 'index.html');
   let cached = null;
   async function template() {
@@ -39,7 +41,7 @@ export function createPages(config, designs) {
     const html = (await template())
       .replace('<!--base-->', `<base href="${esc(config.basePath)}/">`)
       .replace(/<!--meta-->[\s\S]*?<!--\/meta-->/, metaTags(meta));
-    send(ctx.res, status, html, { 'Content-Type': TYPES['.html'], 'Cache-Control': 'no-cache' });
+    send(ctx.res, status, ctx.method === 'HEAD' ? '' : html, { 'Content-Type': TYPES['.html'], 'Cache-Control': 'no-cache' });
   }
 
   return async function handlePage(ctx) {
@@ -48,26 +50,34 @@ export function createPages(config, designs) {
     if (ctx.path === '' || ctx.path === 'index.html') {
       await page(ctx, {
         title: '3D Living Space',
-        description: 'Furnish a to-scale 3D model of a 2 bed, 2 bath apartment, then share your version. Works with AI agents through MCP.',
+        description: 'Turn your floor plan into a to-scale 3D model of your apartment with Claude, furnish it, and share it so anyone can make their own version.',
         url: `${base}/`, image: `${base}/api/card.png`,
       });
       return true;
     }
-    const d = /^d\/([A-Za-z0-9]{8,16})\/?$/.exec(ctx.path);
-    if (d) {
+    const u = /^u\/([A-Za-z0-9]{1,32})\/?$/.exec(ctx.path);
+    if (u) {
       let row = null;
-      try { row = designs.get(d[1]); } catch { row = null; }
+      try { row = units.get(u[1]); } catch { row = null; }
       if (!row) {
-        await page(ctx, { title: 'Design not found · 3D Living Space', description: 'This design does not exist.', url: `${base}/`, image: `${base}/api/card.png` }, 404);
+        await page(ctx, { title: 'Unit not found · 3D Living Space', description: 'This unit does not exist.', url: `${base}/`, image: `${base}/api/card.png` }, 404);
         return true;
       }
-      const n = row.doc.items.length;
+      const spec = row.doc.unit;
+      const about = spec.rooms.length ? facts(spec, row.doc.items).join(', ') : 'not built yet';
       await page(ctx, {
-        title: `${row.title || 'An untitled design'} · 3D Living Space`,
-        description: `${row.author ? `${row.author}'s` : 'A'} furnished version of a 2 bed, 2 bath apartment, ${n} piece${n === 1 ? '' : 's'}. Open it in 3D, then make your own.`,
-        url: designs.viewUrl(row.id, ctx.origin),
-        image: `${base}/api/designs/${row.id}/card.png?v=${row.version}`,
+        title: `${row.title || spec.name || 'An untitled unit'} · 3D Living Space`,
+        description: `${row.author ? `${row.author}'s` : 'An'} apartment in 3D (${about}). Walk through it, then make your own version.`,
+        url: units.viewUrl(row.id, ctx.origin),
+        image: `${base}/api/units/${row.id}/card.png?v=${row.version}`,
       });
+      return true;
+    }
+    // Links to designs from before units: those are units now, with the same ids
+    // (the browser keeps the #edit= part across the redirect).
+    const d = /^d\/([A-Za-z0-9]{8,16})\/?$/.exec(ctx.path);
+    if (d) {
+      send(ctx.res, 301, '', { Location: `${config.basePath}/u/${d[1]}` });
       return true;
     }
     if (/^(src\/[\w.-]+\.js|assets\/[\w./-]+)$/.test(ctx.path)) {

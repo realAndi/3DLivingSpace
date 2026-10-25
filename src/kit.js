@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
-export { pointInPoly, polygonArea } from './space.js';
+export { pointInPoly, polygonArea } from './geometry.js';
 
 // Box-project UVs in feet so tiled textures stay continuous across pieces.
 export function worldUV(g) {
