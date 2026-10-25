@@ -26,8 +26,12 @@ who can look around and make their own version.
   drag to look, use the pad to move, tap the floor to walk there. Tap or click a
   door (or its frame) to open or shut it. Tools sets the look speed.
 - **Furnish.** Add pieces from a catalog of typical sizes, drag, turn, resize and
-  recolor them. Pieces snap flush to walls, and a selected piece shows its
-  clearance to the nearest wall, fixture or piece on each side.
+  recolor them. With *Pieces can't overlap* on (the default), a piece slides
+  along and stops flush against walls, their trim (baseboards, door casings,
+  window stools, at their real heights, so a coffee table slides under a sill
+  that stops a sofa), built-ins and other pieces. Fine-tune with the arrow keys
+  (1", Alt ¼", Shift 1'), `[` `]` to turn 15° (Alt 1°), or the nudge pad on the
+  piece's bar on a phone. A selected piece shows its clearance on each side.
 - **Tape measure** in every view: along the floor in Plan, between any two
   surfaces (heights too) in Dollhouse and Walk.
 - **Units:** Feet & inches, Inches, or Centimeters (Tools tab), per browser.

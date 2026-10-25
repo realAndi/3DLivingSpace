@@ -413,6 +413,20 @@ h1 a:hover { color: var(--oak); }
 .pb-actions svg { width: 19px; height: 19px; }
 .pb-actions .pb-text { font-weight: 600; font-size: 13px; padding: 0 8px; }
 .pb-actions [data-act="done"] { background: var(--chip); color: var(--on-chip); }
+/* Nudge pad: replaces the actions while nudging. */
+.pb-nudge { display: none; gap: 2px; flex: none; align-items: center; }
+.piece-bar.nudging .pb-actions { display: none; }
+.piece-bar.nudging .pb-nudge { display: flex; }
+.pb-nudge button {
+  appearance: none; border: 0; background: var(--surface-2); cursor: pointer; border-radius: 8px;
+  min-width: 38px; height: 38px; display: grid; place-items: center; color: var(--ink); touch-action: none; user-select: none; -webkit-user-select: none;
+}
+.pb-nudge button:hover { background: var(--rule); }
+.pb-nudge svg { width: 19px; height: 19px; }
+.pb-nudge .pb-step { font: 500 12px/1 var(--font-mono); padding: 0 8px; min-width: 46px; background: none; border: 1px solid var(--rule); }
+.pb-nudge .pb-deg { font: 500 12px/1 var(--font-mono); padding: 0 6px; }
+.pb-nudge .pb-back { background: var(--chip); color: var(--on-chip); margin-left: 4px; }
+.keys-note kbd { font: 500 11px/1 var(--font-mono); padding: 1px 5px; border: 1px solid var(--rule); border-radius: 4px; background: var(--surface-2); }
 .edit-layer { position: absolute; inset: 0; pointer-events: none; z-index: 2; }
 .guide-label {
   position: absolute; left: 0; top: 0; white-space: nowrap; pointer-events: none;
@@ -520,6 +534,10 @@ h1 a:hover { color: var(--oak); }
   .stage.visitor .hint, .stage.home .hint { display: none; }
   .piece-bar { bottom: calc(var(--sheet-peek) + var(--safe-b) + 12px); gap: 8px; padding-left: 12px; width: calc(100% - 24px); justify-content: space-between; }
   .pb-actions button { min-width: 36px; }
+  .pb-nudge button { min-width: 34px; }
+  .piece-bar.nudging .pb-meta { display: none; }
+  .piece-bar.nudging { justify-content: center; }
+  .keys-note { display: none; }
   .pb-rot { display: none; }
   .toast { bottom: calc(var(--sheet-peek) + var(--safe-b) + 76px); }
   .stage-card { inset: calc(max(12px, var(--safe-t)) + 60px) 12px calc(var(--sheet-peek) + var(--safe-b) + 12px); place-items: start center; }
@@ -640,6 +658,8 @@ h1 a:hover { color: var(--oak); }
           <div class="group" id="addGroup">
             <h2>Add a piece</h2>
             <p class="section-note flush">Tap a piece to drop it into view, then drag it into place. Sizes are typical; change them to match yours.</p>
+            <label class="toggle"><span>Pieces can't overlap<span class="why">They stop flush against walls, trim, built-ins and each other. Turn off to tuck chairs under a table.</span></span><input type="checkbox" id="optCollide" checked></label>
+            <p class="section-note flush keys-note">Fine-tune with the arrow keys (Alt for ¼", Shift for a foot) and <kbd>[</kbd> <kbd>]</kbd> to turn 15° (Alt for 1°), or the nudge pad on the piece's bar.</p>
             <div class="catalog" id="assetGroup" hidden>
               <h3>Made for this unit</h3>
               <div class="catalog-grid" id="assetList"></div>
@@ -817,8 +837,19 @@ h1 a:hover { color: var(--oak); }
         <button data-act="cw" aria-label="Turn right 90°" title="Turn right (R)"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M14 4.5A6.5 6.5 0 1 0 16.5 10"/><path d="m13.5 1.5.5 3-3 .8"/></svg></button>
         <button data-act="dup" aria-label="Duplicate" title="Duplicate"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="7" y="7" width="10" height="10" rx="1.5"/><path d="M13 7V4.5A1.5 1.5 0 0 0 11.5 3h-7A1.5 1.5 0 0 0 3 4.5v7A1.5 1.5 0 0 0 4.5 13H7"/></svg></button>
         <button data-act="del" aria-label="Delete" title="Delete (Del)"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3.5 5.5h13M8 5.5V3.5h4v2M5.5 5.5l.8 11h7.4l.8-11"/></svg></button>
+        <button data-act="nudge" aria-label="Nudge" title="Nudge: move in small steps"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M10 2.5v15M2.5 10h15M10 2.5 7.8 4.7M10 2.5l2.2 2.2M10 17.5l-2.2-2.2M10 17.5l2.2-2.2M2.5 10l2.2-2.2M2.5 10l2.2 2.2M17.5 10l-2.2-2.2M17.5 10l-2.2 2.2"/></svg></button>
         <button data-act="edit" class="pb-text">Edit</button>
         <button data-act="done" aria-label="Done" title="Done (Esc)"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.9"><path d="m4.5 10.5 3.5 3.5 7.5-8"/></svg></button>
+      </div>
+      <div class="pb-nudge" role="group" aria-label="Nudge">
+        <button data-act="step" class="pb-step" aria-label="Step size" title="Step size"></button>
+        <button data-nudge="left" aria-label="Nudge left"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.9"><path d="m12 4.5-5.5 5.5 5.5 5.5"/></svg></button>
+        <button data-nudge="up" aria-label="Nudge up (away)"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.9"><path d="m4.5 12 5.5-5.5 5.5 5.5"/></svg></button>
+        <button data-nudge="down" aria-label="Nudge down (toward you)"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.9"><path d="m4.5 8 5.5 5.5 5.5-5.5"/></svg></button>
+        <button data-nudge="right" aria-label="Nudge right"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.9"><path d="m8 4.5 5.5 5.5-5.5 5.5"/></svg></button>
+        <button data-fine="-1" aria-label="Turn left 1°" title="Turn left 1°" class="pb-deg">−1°</button>
+        <button data-fine="1" aria-label="Turn right 1°" title="Turn right 1°" class="pb-deg">+1°</button>
+        <button data-act="nudge" class="pb-back" aria-label="Done nudging" title="Done nudging"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.9"><path d="m4.5 10.5 3.5 3.5 7.5-8"/></svg></button>
       </div>
       <p class="pb-warn" id="pbWarn" role="status" hidden></p>
     </div>

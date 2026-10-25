@@ -15,7 +15,7 @@ import {
   ROOM_KINDS, FLOORS, OPENING_TYPES, FIXTURES, fixtureByType, SEGMENTS, FIXTURE_OPTIONS, FINISH_OPTIONS, UNIT_LIMITS,
   cleanUnit, buildUnit, fromInches, toInches, snapToWall,
 } from '../src/unit.js';
-import { problems, clearances, findSpots } from '../src/fit.js';
+import { problems, clearances, findSpots, settleOffWalls } from '../src/fit.js';
 import { AppError, json, readBody, limit } from './http.js';
 import { detailSvg, png } from './render.js';
 import { EXAMPLE_ID } from './service.js';
@@ -253,6 +253,14 @@ export function createMcp(config, units, limiters) {
       return out;
     }
 
+    // A piece set a little into a wall or its trim is eased out (src/fit.js).
+    function settle(U, doc, item, eased) {
+      const p = settleOffWalls(item, U);
+      if (!p) return;
+      eased.push({ id: item.uid, name: item.name ?? item.type, from: [inch(item.x), inch(item.z)], to: [inch(p.x), inch(p.z)] });
+      item.x = Math.round(p.x * 1e4) / 1e4; item.z = Math.round(p.z * 1e4) / 1e4;
+    }
+
     function unitOut(row, U) {
       const spec = row.doc.unit, items = row.doc.items;
       const builtOpening = Object.fromEntries(U.openings.map((o) => [o.id, o]));
@@ -470,7 +478,7 @@ Returns the same report as build_unit. Check the result with render_plan.`,
 
     server.registerTool('place_items', {
       title: 'Place furniture',
-      description: 'Add pieces. Each needs a type (from get_catalog furniture, or "asset:<asset_id>" for a piece made with create_asset) and a center at [x, z] in inches; size defaults to the catalog or asset size. Returns the new pieces with their ids and any problems: running into walls or fixtures, overlapping other pieces, blocking a door.',
+      description: 'Add pieces. Each needs a type (from get_catalog furniture, or "asset:<asset_id>" for a piece made with create_asset) and a center at [x, z] in inches; size defaults to the catalog or asset size. A piece set slightly into a wall or its trim (baseboards stand about ½ in proud of the wall, door casings ¾ in, window stools 1¼ in) is eased out up to 3 in; eased_off_walls lists those. Returns the new pieces with their ids and any problems: running into walls or fixtures, overlapping other pieces, blocking a door.',
       inputSchema: {
         items: z.array(z.object({ type: z.string().describe('Catalog type, or "asset:<asset_id>".'), ...itemShape })).min(1).max(60).describe('Pieces to add.'),
       },
@@ -478,14 +486,17 @@ Returns the same report as build_unit. Check the result with render_plan.`,
       for (const spec of items) {
         if (!/^asset:/.test(spec.type) && !catalogByType[spec.type]) throw new AppError(400, `"${spec.type}" is not in the catalog. Call get_catalog, or build it with create_asset.`);
       }
+      const { U: U0 } = current();
+      const eased = [];
       const { row, result } = write((doc) => items.map((spec) => {
         const item = toItem(spec, { uid: randomId(8) });
         if (item.type === 'asset' && !doc.assets.some((a) => a.id === item.asset)) throw new AppError(400, `There is no asset "${item.asset}" in this unit. create_asset returns the id to use.`);
+        settle(U0, doc, item, eased);
         doc.items.push(item);
         return item.uid;
       }));
       const U = units.built(row);
-      return ok({ placed: row.doc.items.filter((i) => result.includes(i.uid)).map(itemOut(U)), problems: pieceProblems(U, row.doc.items, result), view_url: viewUrl });
+      return ok({ placed: row.doc.items.filter((i) => result.includes(i.uid)).map(itemOut(U)), ...(eased.length ? { eased_off_walls: eased } : {}), problems: pieceProblems(U, row.doc.items, result), view_url: viewUrl });
     }));
 
     server.registerTool('update_items', {
@@ -499,16 +510,19 @@ Returns the same report as build_unit. Check the result with render_plan.`,
         })).min(1).max(150).describe('Pieces to change.'),
       },
     }, ({ items }) => run(() => {
+      const { U: U0 } = current();
+      const eased = [];
       const { row } = write((doc) => {
         for (const spec of items) {
           const i = doc.items.findIndex((it) => it.uid === spec.id);
           if (i < 0) throw new AppError(400, `There is no piece "${spec.id}" in this unit. get_unit lists them.`);
           doc.items[i] = toItem(spec, doc.items[i]);
+          settle(U0, doc, doc.items[i], eased);
         }
       });
       const U = units.built(row);
       const ids = items.map((s) => s.id);
-      return ok({ updated: row.doc.items.filter((i) => ids.includes(i.uid)).map(itemOut(U)), problems: pieceProblems(U, row.doc.items, ids) });
+      return ok({ updated: row.doc.items.filter((i) => ids.includes(i.uid)).map(itemOut(U)), ...(eased.length ? { eased_off_walls: eased } : {}), problems: pieceProblems(U, row.doc.items, ids) });
     }));
 
     server.registerTool('remove_items', {

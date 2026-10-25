@@ -1,8 +1,8 @@
 import * as THREE from 'three';
 import { CATALOG, catalogByType, SWATCHES, buildPiece, bounds, nearPiece, isFlat } from './furniture.js';
-import { clearances, problems } from './fit.js';
+import { clearances, problems, blockersFor, trimRects, collides, pushOut, slideTo } from './fit.js';
 import { cleanItem, randomId } from './design.js';
-import { fmtLen, fmtSize, fmtRug, toInput, fromInput, inputUnit } from './units.js';
+import { fmtLen, fmtSize, fmtRug, toInput, fromInput, inputUnit, getUnits } from './units.js';
 
 // Furniture on screen: add pieces from the catalog (or the unit's own custom
 // pieces), drag them into place, turn, resize and recolor them. While a piece
@@ -13,8 +13,22 @@ import { fmtLen, fmtSize, fmtRug, toInput, fromInput, inputUnit } from './units.
 //
 // `U` is the built unit (src/unit.js): walls and fixtures to keep clear of,
 // and where the floor is. setUnit() swaps it when the unit is rebuilt.
+//
+// With "Pieces can't overlap" on (the default, kept per browser) a piece slides
+// along whatever it meets and stops flush against walls, their trim, built-ins
+// and other pieces; turning or resizing it into something pushes it clear, or
+// is refused when there's no room. Arrow keys and the piece bar's nudge pad move
+// it in small steps, in screen directions.
 
 const snap = (v, step = 1 / 12) => Math.round(v / step) * step;
+const COLLIDE_KEY = 'livingspace.collide.v1';
+const CM = 1 / 30.48;
+// Nudge steps (feet) and their labels, per display units.
+const NUDGE = {
+  imperial: [[1 / 48, '¼"'], [1 / 12, '1"'], [0.5, '6"']],
+  cm: [[0.5 * CM, '0.5 cm'], [2 * CM, '2 cm'], [10 * CM, '10 cm']],
+};
+const nudgeSteps = () => NUDGE[getUnits() === 'cm' ? 'cm' : 'imperial'];
 const escapeHTML = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
 export class LayoutEditor {
@@ -28,6 +42,10 @@ export class LayoutEditor {
     this.enabled = true;
     this.readOnly = false;
     this.dragging = null;
+    this.collide = true;
+    try { this.collide = localStorage.getItem(COLLIDE_KEY) !== 'off'; } catch { /* default */ }
+    this.nudging = false;
+    this.nudgeStep = 1;
     this.ray = new THREE.Raycaster();
     this.floorPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
     this.guideGroup = new THREE.Group();
@@ -92,7 +110,8 @@ export class LayoutEditor {
     this.invalidate();
   }
 
-  obstacles() { return this.U?.obstacles ?? []; }
+  // What clearances are measured to: walls, built-ins and the trim on the walls.
+  obstacles() { return this.U ? [...this.U.obstacles, ...trimRects(this.U)] : []; }
   insideUnit(x, z) { return !!this.U?.insideUnit(x, z); }
 
   // The display units changed: every size on screen.
@@ -149,9 +168,14 @@ export class LayoutEditor {
     this.#emit([copy]);
   }
 
-  update(uid, patch, { rebuild = true } = {}) {
+  update(uid, patch, { rebuild = true, what = null } = {}) {
     const item = this.items.find((x) => x.uid === uid);
     if (!item || this.readOnly) return;
+    // A turn or a new size that runs into something pushes the piece clear.
+    if (what) {
+      patch = this.#fitChange(item, patch, what);
+      if (!patch) { this.#renderEditor(); return; }
+    }
     Object.assign(item, patch);
     item.rot = ((item.rot % 360) + 360) % 360;
     if (rebuild) this.#mount(item);
@@ -164,9 +188,31 @@ export class LayoutEditor {
     this.#emit([item]);
   }
 
+  // Quarter and 15° turns land on multiples of 15°; 1° turns are exact.
   rotate(uid, delta) {
     const item = this.items.find((x) => x.uid === uid);
-    if (item) this.update(uid, { rot: Math.round((item.rot + delta) / 15) * 15 }, { rebuild: false });
+    if (!item) return;
+    const unit = Math.abs(delta) % 15 === 0 ? 15 : 1;
+    this.update(uid, { rot: Math.round((item.rot + delta) / unit) * unit }, { rebuild: false, what: 'turn it' });
+  }
+
+  // Move the selected piece a step in a screen direction ('up' is away from you,
+  // or up the screen in Plan), sliding along and stopping at whatever it meets.
+  nudge(dir, step = nudgeSteps()[this.nudgeStep][0]) {
+    const item = this.current;
+    if (!item || this.readOnly) return;
+    const [ax, az] = this.#screenAxis(dir === 'left' || dir === 'right' ? 'right' : 'up');
+    const sgn = dir === 'left' || dir === 'down' ? -1 : 1;
+    let x = item.x + ax * sgn * step, z = item.z + az * sgn * step;
+    if (this.collide) ({ x, z } = slideTo(item, x, z, this.#blockers(item)));
+    if (Math.hypot(x - item.x, z - item.z) < 1e-5) { this.#stopped(); return; }
+    this.update(item.uid, { x: Math.round(x * 1e4) / 1e4, z: Math.round(z * 1e4) / 1e4 }, { rebuild: false });
+  }
+
+  setCollide(on) {
+    this.collide = !!on;
+    try { localStorage.setItem(COLLIDE_KEY, on ? 'on' : 'off'); } catch { /* this visit only */ }
+    if (this.ui.collide) this.ui.collide.checked = this.collide;
   }
 
   clearAll() {
@@ -288,12 +334,41 @@ export class LayoutEditor {
   }
 
   // ---------------------------------------------------------------- placing
+  #blockers(item) { return this.U ? blockersFor(item, this.U, this.items) : []; }
+
   #overlaps(item) {
-    const b = bounds(item);
-    const hit = (o) => b[0] < o[2] - 0.02 && b[2] > o[0] + 0.02 && b[1] < o[3] - 0.02 && b[3] > o[1] + 0.02;
-    if (this.obstacles().some(hit)) return true;
-    if (isFlat(item)) return false;
-    return this.items.some((i) => i.uid !== item.uid && !isFlat(i) && hit(bounds(i)));
+    return collides(item, this.#blockers(item));
+  }
+
+  // A change to a piece's turn or size: as is when it fits (or collisions are
+  // off, or the piece already overlapped something), pushed a little to fit,
+  // or null with a note when there's no room.
+  #fitChange(item, patch, what) {
+    if (!this.collide || !this.U) return patch;
+    if (collides(item, this.#blockers(item))) return patch;
+    const test = { ...item, ...patch };
+    const shapes = this.#blockers(test);
+    if (!collides(test, shapes)) return patch;
+    // Far enough to turn a long piece around beside a wall: half its length.
+    const p = pushOut(test, shapes, Math.max(0.75, Math.max(test.w, test.d) / 2 + 0.25));
+    if (p) return { ...patch, x: Math.round(p.x * 1e4) / 1e4, z: Math.round(p.z * 1e4) / 1e4 };
+    this.toast(`No room to ${what} here. Move it into the open first, or turn off "Pieces can't overlap".`);
+    return null;
+  }
+
+  #stopped() {
+    const now = performance.now();
+    if (now - (this.stoppedAt ?? 0) > 2500) this.toast('It\'s up against something on that side.');
+    this.stoppedAt = now;
+  }
+
+  // The plan axis nearest a screen direction: 'right', or 'up' (away from the
+  // viewer in Dollhouse and Walk, up the screen in Plan).
+  #screenAxis(which) {
+    const cam = this.getCamera();
+    const v = new THREE.Vector3(which === 'right' ? 1 : 0, 0, which === 'right' ? 0 : -1).applyQuaternion(cam.quaternion);
+    if (which === 'up' && Math.hypot(v.x, v.z) < 0.3) v.set(0, 1, 0).applyQuaternion(cam.quaternion);
+    return Math.abs(v.x) >= Math.abs(v.z) ? [Math.sign(v.x), 0] : [0, Math.sign(v.z)];
   }
 
   // Nearest spot to (x, z) inside the unit where the piece doesn't hit anything.
@@ -380,7 +455,7 @@ export class LayoutEditor {
       e.preventDefault();
       const item = this.current;
       const p = this.#floorAt(e);
-      drag = { id: e.pointerId, sx: e.clientX, sy: e.clientY, moved: false, ox: p ? item.x - p.x : 0, oz: p ? item.z - p.z : 0 };
+      drag = { id: e.pointerId, sx: e.clientX, sy: e.clientY, moved: false, ox: p ? item.x - p.x : 0, oz: p ? item.z - p.z : 0, blockers: this.collide ? this.#blockers(item) : null };
       this.dragging = uid;
       el.setPointerCapture(e.pointerId);
     }, { capture: true });
@@ -393,9 +468,18 @@ export class LayoutEditor {
       const p = this.#floorAt(e);
       const item = this.current;
       if (!p || !item) return;
-      const next = { ...item, x: snap(p.x + drag.ox), z: snap(p.z + drag.oz) };
-      if (!this.insideUnit(next.x, next.z)) return;
+      // Alt (Option) while dragging: a ¼" grid instead of 1".
+      const grid = e.altKey ? 1 / 48 : 1 / 12;
+      const tx = snap(p.x + drag.ox, grid), tz = snap(p.z + drag.oz, grid);
+      let next;
+      if (drag.blockers) next = { ...item, ...slideTo(item, tx, tz, drag.blockers) };
+      else {
+        next = { ...item, x: tx, z: tz };
+        if (!this.insideUnit(next.x, next.z)) return;
+      }
+      const before = { x: next.x, z: next.z };
       this.#snapToWalls(next);
+      if (drag.blockers && collides(next, drag.blockers)) Object.assign(next, before);
       item.x = next.x; item.z = next.z;
       this.groups.get(item.uid).position.set(item.x, 0, item.z);
       this.#updateGuides();
@@ -427,16 +511,16 @@ export class LayoutEditor {
       if (e.key === 'Escape') { this.select(null); e.preventDefault(); return; }
       if (this.readOnly) return;
       const walk = this.getMode() === 'walk';
-      const step = e.shiftKey ? 1 : 1 / 12;
-      const moves = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] };
+      // Arrows nudge 1" (1 cm), Alt the finest step, Shift a foot; in screen directions.
+      const fine = nudgeSteps()[0][0], step = e.shiftKey ? 1 : e.altKey ? fine : getUnits() === 'cm' ? CM : 1 / 12;
+      const dirs = { ArrowLeft: 'left', ArrowRight: 'right', ArrowUp: 'up', ArrowDown: 'down' };
+      const turn = e.altKey ? 1 : 15;
       if (e.key === 'Delete' || e.key === 'Backspace') this.remove(item.uid);
       else if (e.key === 'r' || e.key === 'R') this.rotate(item.uid, e.shiftKey ? -90 : 90);
-      else if (e.key === ']') this.rotate(item.uid, 15);
-      else if (e.key === '[') this.rotate(item.uid, -15);
-      else if (moves[e.key] && !walk) {
-        const [dx, dz] = moves[e.key];
-        this.update(item.uid, { x: snap(item.x + dx), z: snap(item.z + dz) }, { rebuild: false });
-      } else return;
+      else if (e.code === 'BracketRight') this.rotate(item.uid, turn);
+      else if (e.code === 'BracketLeft') this.rotate(item.uid, -turn);
+      else if (dirs[e.key] && !walk) this.nudge(dirs[e.key], step);
+      else return;
       e.preventDefault();
       e.stopImmediatePropagation();
     }, { capture: true });
@@ -469,13 +553,18 @@ export class LayoutEditor {
     const dim = (input, key) => input.addEventListener('change', () => {
       const ft = fromInput(input.value);
       if (!this.current || ft === null || ft <= 0) return this.#renderEditor();
-      this.update(this.current.uid, { [key]: Math.max(1 / 12, Math.min(key === 'h' ? 9 : 30, ft)) });
+      this.update(this.current.uid, { [key]: Math.max(1 / 12, Math.min(key === 'h' ? 9 : 30, ft)) }, { what: 'make it that size' });
     });
     dim(this.ui.w, 'w'); dim(this.ui.d, 'd'); dim(this.ui.h, 'h');
     this.ui.rot.addEventListener('change', () => {
       const v = parseFloat(this.ui.rot.value);
-      if (this.current && Number.isFinite(v)) this.update(this.current.uid, { rot: v }, { rebuild: false });
+      if (this.current && Number.isFinite(v)) this.update(this.current.uid, { rot: v }, { rebuild: false, what: 'turn it' });
     });
+    this.ui.collide = $('#optCollide');
+    if (this.ui.collide) {
+      this.ui.collide.checked = this.collide;
+      this.ui.collide.addEventListener('change', () => this.setCollide(this.ui.collide.checked));
+    }
     this.ui.name.addEventListener('change', () => {
       const c = this.current;
       if (c) this.update(c.uid, { name: this.ui.name.value.trim().slice(0, 40) || (c.type === 'asset' ? this.assets[c.asset]?.name : catalogByType[c.type].name) || 'Piece' }, { rebuild: false });
@@ -497,8 +586,23 @@ export class LayoutEditor {
         dup: () => this.duplicate(item.uid),
         del: () => this.remove(item.uid),
         done: () => this.select(null),
+        nudge: () => { this.nudging = !this.nudging; this.#renderBar(); },
+        step: () => { this.nudgeStep = (this.nudgeStep + 1) % nudgeSteps().length; this.#renderBar(); },
       })[b.dataset.act]?.();
     });
+    // The nudge pad acts on press and repeats while held.
+    let hold = null;
+    const stop = () => { if (hold) { clearTimeout(hold.t); clearInterval(hold.i); hold = null; } };
+    this.ui.bar.addEventListener('pointerdown', (e) => {
+      const b = e.target.closest('[data-nudge], [data-fine]');
+      if (!b || !this.current) return;
+      e.preventDefault();
+      stop();
+      const act = () => (b.dataset.nudge ? this.nudge(b.dataset.nudge) : this.rotate(this.current.uid, Number(b.dataset.fine)));
+      act();
+      hold = { t: setTimeout(() => { hold.i = setInterval(act, 90); }, 380) };
+    });
+    for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) this.ui.bar.addEventListener(ev, stop);
     const clear = $('#clearLayout');
     clear.addEventListener('click', () => {
       if (!this.items.length || this.readOnly) return;
@@ -571,6 +675,10 @@ export class LayoutEditor {
     const item = this.current, ui = this.ui;
     ui.bar.hidden = !item || !this.root.visible;
     ui.bar.classList.toggle('read-only', this.readOnly);
+    if (!item || this.readOnly) this.nudging = false;
+    ui.bar.classList.toggle('nudging', this.nudging);
+    const stepBtn = ui.bar.querySelector('[data-act="step"]');
+    if (stepBtn) stepBtn.textContent = nudgeSteps()[this.nudgeStep][1];
     if (!item) return;
     ui.barName.textContent = item.name;
     ui.barDims.textContent = fmtSize(item.w, item.d, item.h);
