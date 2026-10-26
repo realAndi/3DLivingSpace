@@ -156,9 +156,9 @@ function onEdge(x, z, poly, tol = 1e-4) {
 const BEHIND = 1 / 24;
 const wallBehind = (U, e, s) => U.wallAt(e.p[0] + e.u[0] * s + e.n[0] * BEHIND, e.p[1] + e.u[1] * s + e.n[1] * BEHIND);
 const covers = (spans, y0, y1) => !!spans?.some(([a, b]) => a <= y0 + 1e-3 && b >= y1 - 1e-3);
-// Where to look along a piece's width: both ends (an inch in) and every 6" between.
+// Where to look along a piece's width: both ends (⅛" in) and every 6" between.
 function across(w) {
-  const half = Math.max(0, w / 2 - 1 / 24), n = Math.max(2, Math.ceil((2 * half) / 0.5));
+  const half = Math.max(0, w / 2 - 1 / 96), n = Math.max(2, Math.ceil((2 * half) / 0.5));
   return Array.from({ length: n + 1 }, (_, i) => -half + (2 * half * i) / n);
 }
 

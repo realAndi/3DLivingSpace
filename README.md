@@ -34,7 +34,7 @@ who can look around and make their own version.
   desks up to their backs, stools under an island's overhang, a lamp's shade
   over a sofa arm, a side table into a sectional's corner. Fine-tune with the arrow keys
   (1", Alt ¼", Shift 1'), `[` `]` to turn 15° (Alt 1°), or the nudge pad on the
-  piece's bar on a phone. A selected piece shows its clearance on each side.
+  piece's bar on a phone. A selected piece on the floor shows its clearance on each side.
 - **Where things go.** Every piece has a placement. Floor pieces stand on the
   floor. Surface pieces (lamps, books, a vase, plates, a laptop, a coffee maker)
   snap onto the table, dresser, shelf or counter under them. Wall pieces (art,

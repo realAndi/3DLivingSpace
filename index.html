@@ -410,8 +410,19 @@ h1 a:hover { color: var(--oak); }
 /* ---------- Furniture ---------- */
 .tab .count { font: 500 10.5px/1 var(--font-mono); color: var(--oak); margin-left: 2px; }
 .section-note.flush { margin: 0 0 12px; }
-.catalog h3 { font: 600 12px/1 var(--font-ui); letter-spacing: 0.04em; color: var(--ink-2); margin: 16px 0 8px; }
+.catalog h3 { font: 600 12px/1 var(--font-ui); letter-spacing: 0.04em; color: var(--ink-2); margin: 14px 0 8px; }
 .catalog h3:first-child { margin-top: 4px; }
+/* A kind's own heading shows only under the unit's custom pieces of that kind. */
+#assetGroup[hidden] + .catalog .kind-head { display: none; }
+#assetGroup:not([hidden]) + .catalog h3:first-child { margin-top: 16px; }
+/* Kinds of pieces: one at a time, so the list stays short. */
+.kind-chips { display: flex; flex-wrap: wrap; gap: 6px 5px; margin: 2px 0 12px; }
+.kind-chip {
+  appearance: none; cursor: pointer; flex: none; border: 1px solid var(--rule); background: var(--surface);
+  border-radius: 999px; padding: 5px 9px; font-weight: 600; font-size: 12px; color: var(--ink-2); white-space: nowrap;
+}
+.kind-chip:hover { border-color: var(--ink-2); color: var(--ink); }
+.kind-chip[aria-pressed="true"] { background: var(--chip); color: var(--on-chip); border-color: var(--chip); }
 .catalog-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
 .cat-btn {
   appearance: none; cursor: pointer; text-align: left; min-width: 0;
@@ -421,6 +432,7 @@ h1 a:hover { color: var(--oak); }
 .cat-btn:hover { background: var(--surface-2); border-color: var(--ink-2); }
 .cat-btn b { font-size: 13px; font-weight: 600; }
 .cat-btn small { font: 400 11px/1.2 var(--font-mono); color: var(--ink-2); }
+.cat-btn small i { display: block; margin-top: 3px; font: 500 9.5px/1 var(--font-mono); letter-spacing: 0.06em; text-transform: uppercase; font-style: normal; color: var(--oak); }
 .fields { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin: 10px 0 12px; }
 .field { display: flex; flex-direction: column; gap: 4px; position: relative; min-width: 0; }
 .field.wide { width: 100%; }
@@ -434,6 +446,10 @@ h1 a:hover { color: var(--oak); }
 .field input:disabled { opacity: 0.45; }
 .field em { position: absolute; right: 7px; bottom: 10px; font: 400 11px/1 var(--font-mono); color: var(--ink-2); font-style: normal; pointer-events: none; }
 .pe-warn { margin: -4px 0 12px; font-size: 12.5px; color: var(--warn); }
+.pe-place { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin: -2px 0 12px; }
+.pe-place .field { width: 132px; flex: none; }
+.pe-on { margin: 0; font-size: 13.5px; font-weight: 600; min-width: 0; flex: 1 1 auto; }
+.pe-place .btn { padding: 7px 13px; flex: none; }
 .swatches { display: flex; flex-wrap: wrap; gap: 7px; margin: 0 0 14px; }
 .swatch { width: 26px; height: 26px; border-radius: 50%; border: 1px solid var(--rule); cursor: pointer; padding: 0; }
 .swatch[aria-pressed="true"] { outline: 2px solid var(--ink); outline-offset: 2px; }
@@ -445,8 +461,13 @@ h1 a:hover { color: var(--oak); }
 .piece-row span { font-weight: 600; font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .piece-row small { font: 400 11.5px/1 var(--font-mono); color: var(--ink-2); white-space: nowrap; }
 .piece-row[aria-current="true"] { box-shadow: inset 3px 0 0 var(--oak); }
+/* What rests on a piece is listed under it. */
+.layout-list .on-piece { padding-left: calc(var(--depth, 1) * 16px); }
+.layout-list .on-piece .piece-row span::before { content: "↳ "; color: var(--ink-2); font-weight: 400; }
 
 .piece-bar.read-only .pb-actions button:not([data-act="done"]) { display: none; }
+/* A wall piece turns only with its wall. */
+.piece-bar.on-wall [data-act="ccw"], .piece-bar.on-wall [data-act="cw"], .piece-bar.on-wall .pb-deg { display: none; }
 .piece-bar {
   position: absolute; left: 50%; transform: translateX(-50%); bottom: 18px; z-index: 4;
   display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; max-width: calc(100% - 24px);
@@ -489,6 +510,8 @@ h1 a:hover { color: var(--oak); }
   position: absolute; left: 50%; transform: translateX(-50%); bottom: 84px; z-index: 6;
   display: flex; align-items: center; gap: 12px; background: var(--chip); color: var(--on-chip);
   border-radius: 999px; padding: 9px 10px 9px 16px; font-size: 13px; box-shadow: var(--shadow); max-width: calc(100% - 24px);
+  /* As wide as its words (up to the stage), not half the stage from its left: 50%. */
+  width: max-content;
 }
 .toast:not(:has(button)) { padding-right: 16px; }
 .toast button { appearance: none; border: 0; background: none; color: var(--oak); font-weight: 700; cursor: pointer; padding: 2px 6px; }
@@ -602,6 +625,9 @@ h1 a:hover { color: var(--oak); }
   .card p { font-size: 14px; }
   .fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .catalog-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .kind-chips { gap: 7px 6px; }
+  .kind-chip { padding: 8px 12px; font-size: 12.5px; }
+  .cat-btn { padding: 8px 10px; }
   .tab { font-size: 12.5px; padding-left: 2px; padding-right: 2px; }
 }
 @media (max-width: 380px) {
@@ -699,6 +725,12 @@ h1 a:hover { color: var(--oak); }
               <label class="field"><span>Height</span><input id="peH" type="number" min="1" max="108" step="0.5" inputmode="decimal"><em data-len-unit>in</em></label>
               <label class="field"><span>Turn</span><input id="peRot" type="number" step="15" inputmode="numeric"><em>°</em></label>
             </div>
+            <!-- Where it sits: a wall piece's height, or what a piece rests on. -->
+            <div class="pe-place" id="pePlace" hidden>
+              <label class="field" id="peYField"><span>Height off floor</span><input id="peY" type="number" min="0" max="108" step="0.5" inputmode="decimal"><em data-len-unit>in</em></label>
+              <p class="pe-on" id="peOn"></p>
+              <button class="btn" id="peFloor">Put on floor</button>
+            </div>
             <p class="pe-warn" id="peWarn" role="status" hidden></p>
             <div class="swatches" id="peSwatches" role="group" aria-label="Color"></div>
             <div class="btn-row">
@@ -712,14 +744,15 @@ h1 a:hover { color: var(--oak); }
           </div>
           <div class="group" id="addGroup">
             <h2>Add a piece</h2>
-            <p class="section-note flush">Tap a piece to drop it into view, then drag it into place. Sizes are typical; change them to match yours.</p>
-            <label class="toggle"><span>Pieces can't overlap<span class="why">They stop flush against walls, trim, built-ins and each other. Turn off to tuck chairs under a table.</span></span><input type="checkbox" id="optCollide" checked></label>
-            <p class="section-note flush keys-note">Fine-tune with the arrow keys (Alt for ¼", Shift for a foot) and <kbd>[</kbd> <kbd>]</kbd> to turn 15° (Alt for 1°), or the nudge pad on the piece's bar.</p>
+            <p class="section-note flush">Tap a piece to drop it into view, then drag it into place: lamps and books onto tables and shelves, art along and up the walls. Sizes are typical; change them to match yours.</p>
+            <div class="kind-chips" id="kindChips" role="group" aria-label="Kind of piece"></div>
             <div class="catalog" id="assetGroup" hidden>
               <h3>Made for this unit</h3>
               <div class="catalog-grid" id="assetList"></div>
             </div>
             <div class="catalog" id="catalog"></div>
+            <label class="toggle"><span>Pieces can't overlap<span class="why">They stop flush against walls, trim, built-ins and each other. Turn off to tuck chairs under a table.</span></span><input type="checkbox" id="optCollide" checked></label>
+            <p class="section-note flush keys-note">Fine-tune with the arrow keys (Alt for ¼", Shift for a foot; on a wall, up and down raise and lower it) and <kbd>[</kbd> <kbd>]</kbd> to turn 15° (Alt for 1°), or the nudge pad on the piece's bar.</p>
           </div>
           <div class="group" id="layoutGroup">
             <h2>Your layout</h2>
