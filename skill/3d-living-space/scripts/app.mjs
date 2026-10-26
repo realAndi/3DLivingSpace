@@ -1,8 +1,9 @@
 // The app as an Artifact's files: the site's own index.html, src/ and textures,
 // with nothing rewritten but the page's outer shell. An Artifact is published as
 // the inside of <body> (the platform adds the doctype, head and body around it),
-// so the page keeps its title, fonts, styles and import map at the top and
-// starts with a line that tells src/main.js it is running as an Artifact. Its
+// so the page keeps its title, fonts and styles at the top and starts with a
+// line that tells src/main.js it is running as an Artifact. It has no import
+// map (see absoluteThree). Its
 // <title> is the Artifact's name in the gallery: the unit's, when it has one.
 //
 // assembleApp(root, outDir) writes the files under outDir and returns their
@@ -20,9 +21,9 @@ const esc = (s) => String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt
 export const pageTitle = (title) => `<title>${esc(title || '3D Living Space')}</title>`;
 
 // three.js by absolute URL in the Artifact's copies of src/. An Artifact can't
-// count on its import map: if the viewer around it loads a module first, the
-// browser ignores the map and `import 'three'` has nothing to resolve to. So
-// nothing bare is left: jsDelivr's +esm builds of three and its add-ons, which
+// use an import map: the viewer around it loads a module first, and then
+// browsers that take one map only (Firefox, Safari) reject the page's, so
+// `import 'three'` has nothing to resolve to. So nothing bare is left: jsDelivr's +esm builds of three and its add-ons, which
 // name three by that same URL, so every module shares one copy of it. `base` is
 // the package's URL, from the site's import map.
 export function absoluteThree(code, base) {
@@ -108,8 +109,7 @@ export function artifactPage(html, { title } = {}) {
   const pick = (re) => [...head.matchAll(re)].map((m) => m[0]);
   const fonts = pick(/<link rel="stylesheet" href="https:\/\/fonts\.googleapis\.com[^>]*>/g);
   const styles = pick(/<style>[\s\S]*?<\/style>/g);
-  const importMap = pick(/<script type="importmap">[\s\S]*?<\/script>/g);
-  if (!styles.length || !importMap.length) throw new Error('index.html lost its <style> or import map.');
+  if (!styles.length) throw new Error('index.html lost its <style>.');
   // What the site's <html lang> and <body data-role> said, plus the switch
   // src/main.js reads; set before the page's styles apply, so nothing meant
   // only for the site flashes up.
@@ -119,7 +119,7 @@ export function artifactPage(html, { title } = {}) {
     .replace(/<script>\s*function appFailed\(\)[\s\S]*?<\/script>\s*/, '')
     .replace(/<script type="module" src="\.\/src\/main\.js"[^>]*><\/script>/, START);
   if (!app.includes('import(\'./src/main.js\')')) throw new Error('index.html no longer loads ./src/main.js the way app.mjs expects.');
-  return [pageTitle(title), boot, ...fonts, ...styles, ...importMap, app, ''].join('\n');
+  return [pageTitle(title), boot, ...fonts, ...styles, app, ''].join('\n');
 }
 
 export function assembleApp(root, outDir, { title } = {}) {

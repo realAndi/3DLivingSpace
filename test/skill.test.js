@@ -208,7 +208,9 @@ test('skill: bundle, push and pull keep the Artifact\'s files and database in st
   assert.match(b.publish.description, /^A to-scale 3D model of a studio, 1 bath apartment/);
   const page = readFileSync(b.publish.file_path, 'utf8');
   assert.doesNotMatch(page, /<!doctype|<html[\s>]|<head>|<body[\s>]/i, 'body only');
-  assert.match(page, /<script type="importmap">/);
+  // No import map: three.js by absolute URL in the modules (a viewer's runtime makes browsers ignore a page's map).
+  assert.doesNotMatch(page, /<script type="importmap">/);
+  assert.match(readFileSync(join(root, 'src/main.js'), 'utf8'), /from 'https:\/\/cdn\.jsdelivr\.net\/npm\/three@[\d.]+\/\+esm'/);
   assert.match(page, /window\.LIVING_SPACE = 'artifact'/);
   const paths = b.publish.files.map((f) => f.path);
   for (const p of ['src/main.js', 'src/unit.js', 'assets/tex/512/marble-color.webp', 'unit.json']) assert.ok(paths.includes(p), p);

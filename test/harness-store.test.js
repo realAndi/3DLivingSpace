@@ -290,7 +290,7 @@ test('the harness server: the page, the snapshot and the hooks', async () => {
     assert.match(page, /^<!doctype html><html><head><meta charset=utf8>/);
     assert.ok(page.indexOf('window.claude = Object.freeze') < page.indexOf('</head><body>'), 'the mock is in <head>');
     assert.match(page, /"role":"contributor","level":"interact","uid":"u_jo2"/);
-    assert.match(page, /<script type="importmap">/);
+    assert.doesNotMatch(page, /<script type="importmap">/); // three.js by absolute URL instead (app.mjs absoluteThree)
     assert.ok(page.endsWith('</body></html>'));
     assert.equal((await fetch(`${h.url}/?as=nobody`)).status, 400);
 

@@ -8,7 +8,7 @@
 // fonts still come from the network.
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join, posix } from 'node:path';
-import { moduleGraph, artifactPage, pageTitle } from './app.mjs';
+import { moduleGraph, artifactPage, pageTitle, absoluteThree, threeBase } from './app.mjs';
 
 const NAME = 'living-space/';  // the bare prefix the modules are mapped under
 const IMPORT = /((?:^|[;\s])(?:import|export)\s[^'"`;]*?from\s*)(['"])(\.{1,2}\/[^'"]+)\2|((?:^|[;\s])import\s*)(['"])(\.{1,2}\/[^'"]+)\5|(import\(\s*)(['"])(\.{1,2}\/[^'"]+)\8(\s*\))/gm;
@@ -25,12 +25,16 @@ function rewrite(code, rel) {
 
 // root holds the site's index.html, src/ and assets/ (a checkout), or the
 // Artifact's files already assembled (a packaged skill's app/: pass its page).
+// Its modules: a checkout's own (three.js made absolute, as app.mjs does for
+// an Artifact), or the packaged app's, which already are.
 export function singleFile(root, snapshot, { page, title } = {}) {
-  page = page ? page.replace(/<title>[^<]*<\/title>/, () => pageTitle(title)) : artifactPage(readFileSync(join(root, 'index.html'), 'utf8'), { title });
-  const base = JSON.parse(/<script type="importmap">([\s\S]*?)<\/script>/.exec(page)[1]);
-  const imports = { ...base.imports };
+  const site = !page;
+  page = site ? artifactPage(readFileSync(join(root, 'index.html'), 'utf8'), { title }) : page.replace(/<title>[^<]*<\/title>/, () => pageTitle(title));
+  const base = site ? threeBase(readFileSync(join(root, 'index.html'), 'utf8')) : null;
+  const imports = {};
   for (const rel of moduleGraph(root)) {
-    imports[NAME + rel] = `data:text/javascript;base64,${b64(rewrite(readFileSync(join(root, rel), 'utf8'), rel))}`;
+    const code = readFileSync(join(root, rel), 'utf8');
+    imports[NAME + rel] = `data:text/javascript;base64,${b64(rewrite(site ? absoluteThree(code, base) : code, rel))}`;
   }
   const textures = {};
   for (const size of ['512', '1024']) {
@@ -45,11 +49,12 @@ export function singleFile(root, snapshot, { page, title } = {}) {
   if (typeof src === 'string' && /^assets\/[\w.-]+\.(png|jpg)$/.test(src) && existsSync(join(root, src))) {
     plans[src] = `data:image/${src.endsWith('.png') ? 'png' : 'jpeg'};base64,${b64(readFileSync(join(root, src)))}`;
   }
+  // Nothing loads a module before this page, so the modules' own names can go in a map.
   const body = page
-    .replace(/<script type="importmap">[\s\S]*?<\/script>/, () => `<script type="importmap">${json({ imports })}</script>`)
+    .replace(/<\/style>\n(?![\s\S]*<\/style>)/, () => `</style>\n<script type="importmap">${json({ imports })}</script>\n`)
     // The page starts the app with import('./src/main.js') (app.mjs START): here it's a bare name.
     .replace("import('./src/main.js')", () => `import('${NAME}src/main.js')`);
-  if (!body.includes(`import('${NAME}src/main.js')`)) throw new Error('The page no longer starts ./src/main.js the way single.mjs expects.');
+  if (!body.includes('<script type="importmap">') || !body.includes(`import('${NAME}src/main.js')`)) throw new Error('The page no longer starts ./src/main.js the way single.mjs expects.');
   return '<!doctype html><html lang="en"><head><meta charset="utf-8">'
     + '<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"></head><body>\n'
     + `<script>document.documentElement.classList.add('in-file'); window.LIVING_SPACE_SNAPSHOT = ${json(snapshot)}; window.LIVING_SPACE_TEXTURES = ${json(textures)}; window.LIVING_SPACE_PLANS = ${json(plans)};</script>\n`
