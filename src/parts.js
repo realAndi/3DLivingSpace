@@ -42,6 +42,7 @@ class Parts {
 
 // ---------------------------------------------------------------------------
 // Catalog pieces, builder by builder (src/furniture.js BUILDERS).
+const IN = 1 / 12;
 const PIECES = {
   bed(P, w, d, h) {
     P.legs(w - 0.1, d, 0.35, 0.2, 0.035);
@@ -170,10 +171,137 @@ const PIECES = {
     P.round(0, d / 2, r, r, Math.max(0, lo), hi);
   },
   box(P, w, d, h) { P.box(-w / 2, 0, w / 2, d, 0, h); },
+
+  // On tables, counters, shelves and dressers.
+  // The jar, the neck and the shade.
+  'table-lamp'(P, w, d, h) {
+    const r = Math.min(w, d) / 2, sh = h * 0.42, bh = h * 0.52, br = Math.min(r * 0.5, bh * 0.32), n = r * 0.06;
+    P.round(0, d / 2, br, br, 0, bh);
+    P.box(-n, d / 2 - n, n, d / 2 + n, bh, h - sh * 0.7);
+    P.round(0, d / 2, r, r, h - sh, h);
+  },
+  // The row as one block (spines at the front, the shortest book ¾ of it deep).
+  books(P, w, d, h) { P.box(-w / 2, 0, w / 2, d, 0, h); },
+  // Body and neck.
+  vase(P, w, d, h) {
+    const r = Math.min(w, d) / 2;
+    P.round(0, d / 2, r, r, 0, h * 0.85);
+    P.round(0, d / 2, r * 0.42, r * 0.42, h * 0.85, h);
+  },
+  'plant-small'(P, w, d, h) {
+    const r = Math.min(w, d) / 2, leaves = smallPlantLeaves(r, h);
+    P.round(0, d / 2, r * 0.62, r * 0.62, 0, h * 0.4);
+    P.round(0, d / 2, r, r, Math.max(0, Math.min(...leaves.map(([, y, , rk]) => y - rk))), h);
+  },
+  // The plates, and the bowl on them.
+  plates(P, w, d, h) {
+    const R = Math.min(w, d) / 2;
+    P.round(0, d / 2, R, R, 0, h * 0.355);
+    P.round(0, d / 2, R * 0.55, R * 0.55, h * 0.1925, h);
+  },
+  // The base, and the lid standing behind it.
+  laptop(P, w, d, h) {
+    const { bt, lt, tilt, D, hinge } = laptopLid(d, h);
+    P.box(-w / 2, hinge, w / 2, hinge + D, 0, bt + 0.03 * IN);
+    P.box(-w / 2, 0, w / 2, hinge, bt - lt * Math.sin(tilt), h);
+  },
+  // The body with its door shut, and the door's handle.
+  microwave(P, w, d, h) {
+    const c1 = w / 2 - Math.min(4.6 * IN, w * 0.24) - 0.04 * IN;
+    P.box(-w / 2, 0, w / 2, d - 0.5 * IN, 0, h);
+    P.box(c1 - 1.0 * IN, d - 0.5 * IN, c1 - 0.4 * IN, d, h * 0.2, h * 0.8);
+  },
+  // Base, reservoir, the head over the carafe, and the carafe with its handle.
+  'coffee-maker'(P, w, d, h) {
+    const tw = d * 0.42, hh = Math.min(3.2 * IN, h * 0.24), pb = 0.9 * IN, tc = d * 0.71, rc = Math.min(w / 2 - 0.6 * IN, d - tc - 0.2 * IN);
+    P.box(-w / 2, 0, w / 2, d, 0, pb);
+    P.box(-w / 2, 0, w / 2, tw, pb, h);
+    P.box(-w / 2, tw, w / 2, d, h - hh, h);
+    P.box(-rc, tc - rc, rc + 0.5 * IN, tc + rc, pb, h - hh);
+  },
+
+  // On the walls (t = 0 is the wall).
+  'wall-art'(P, w, d, h) { P.box(-w / 2, 0, w / 2, d, 0, h); },
+  mirror(P, w, d, h) { P.box(-w / 2, 0, w / 2, d, 0, h); },
+  'wall-shelf'(P, w, d, h) { P.box(-w / 2, 0, w / 2, d, 0, h); },
+  // The panel, with its mount behind it.
+  'wall-tv'(P, w, d, h) { P.box(-w / 2, 0, w / 2, d, 0, h); },
+  // The plate, the arm up into the shade, and the shade.
+  sconce(P, w, d, h) {
+    const r = Math.min(w, d) / 2, sy = h * 0.45, tc = d - r, ay = sy - 0.5 * IN, pw = Math.min(0.9 * IN, w * 0.15);
+    P.box(-pw, 0, pw, 0.5 * IN, Math.max(0, ay - 1.6 * IN), ay + 2.6 * IN);
+    P.box(-0.6 * IN, 0.5 * IN, 0.6 * IN, tc + 0.6 * IN, ay - 0.28 * IN, sy + 1.2 * IN);
+    P.round(0, tc, r, r, sy, h);
+  },
+  // The rod, finials and brackets; the panels below, clear of the wall.
+  curtains(P, w, d, h) {
+    const fr = Math.min(1.2 * IN, d * 0.2), rt = Math.min(3.4 * IN, d - fr), { amp, tc } = curtainFolds(d);
+    P.box(-w / 2, 0, w / 2, rt + fr, h - 2 * fr, h);
+    P.box(-w / 2 + 2 * fr, tc - amp * 1.15, w / 2 - 2 * fr, tc + amp * 1.15, 0, h - fr - 1.15 * IN);
+  },
+  // The cassette, and the shade and its hem bar let down.
+  blinds(P, w, d, h) {
+    const ch = Math.min(3 * IN, h * 0.1), tf = d * 0.55;
+    P.box(-w / 2, 0, w / 2, d, h - ch, h);
+    P.box(-w / 2 + 0.3 * IN, tf - 0.3 * IN, w / 2 - 0.3 * IN, tf + 0.3 * IN, 0, h - ch);
+  },
+
+  // From the ceiling (y = h is the ceiling).
+  // The dome, the cord and the canopy.
+  pendant(P, w, d, h) {
+    const r = Math.min(w, d) / 2, sh = Math.min(h * 0.6, r * 1.15), cy = sh * 0.97 + Math.min(1.5 * IN, h * 0.05), can = Math.min(2.5 * IN, r), c = 0.12 * IN;
+    P.round(0, d / 2, r, r, 0, cy);
+    P.box(-c, d / 2 - c, c, d / 2 + c, cy, h - 1 * IN);
+    P.round(0, d / 2, can, can, h - 1 * IN, h);
+  },
+  // Canopy, downrod, motor, and the disc the blades sweep.
+  'ceiling-fan'(P, w, d, h) {
+    const R = Math.min(w, d) / 2, k = Math.min(1, h / (14 * IN)), ch = 2.2 * IN * k, mt = 6.5 * IN * k, yb = 3.8 * IN * k, c = 0.45 * IN;
+    P.round(0, d / 2, 3 * IN, 3 * IN, h - ch, h);
+    P.box(-c, d / 2 - c, c, d / 2 + c, mt, h - ch);
+    P.round(0, d / 2, 4.6 * IN, 4.6 * IN, 0, mt);
+    P.round(0, d / 2, R, R, yb - 0.75 * IN, yb + 0.75 * IN);
+  },
 };
 
 // Where the plant builder puts leaf k of radius rk (src/furniture.js).
 export const plantLeafY = (h, k, rk) => Math.max(rk, Math.min(h * (0.55 + k * 0.12), h - rk));
+
+// A small plant's leaves around and over its pot, as [dx, y, dz, radius],
+// within its radius r and height h.
+export function smallPlantLeaves(r, h) {
+  const rk = r * 0.48, out = [];
+  for (let k = 0; k < 5; k++) {
+    const a = k * 1.2566 + 0.3;
+    out.push([Math.cos(a) * r * 0.48, Math.min(h - rk, h * (0.5 + 0.06 * (k % 3))), Math.sin(a) * r * 0.48, rk]);
+  }
+  out.push([0, h - r * 0.5, 0, r * 0.5]);
+  return out;
+}
+
+// How an open laptop stands in its footprint (feet): the base bt thick and
+// D deep, from `hinge` to the front; the lid (lt thick, as deep as the base)
+// tilted back from upright by `tilt` (radians), as far as the depth allows
+// with its top at h.
+export function laptopLid(d, h) {
+  const bt = Math.min(0.6 * IN, h * 0.08), lt = 0.22 * IN;
+  const depth = (a) => ((h - bt) * (1 + Math.sin(a))) / Math.cos(a) + lt * Math.cos(a);
+  let tilt = 0;
+  if (depth(0) < d) {
+    let lo = 0, hi = (50 * Math.PI) / 180;
+    for (let i = 0; i < 40; i++) { const m = (lo + hi) / 2; if (depth(m) <= d) lo = m; else hi = m; }
+    tilt = lo;
+  }
+  const D = depth(0) < d ? (h - bt) / Math.cos(tilt) : d - lt;
+  return { bt, lt, tilt, D, hinge: D * Math.sin(tilt) + lt * Math.cos(tilt) };
+}
+
+// How a curtain's folds hang (feet): `amp` either side of tc out from the
+// wall, the back of the deepest fold clear of a window stool (1¼").
+export function curtainFolds(d) {
+  const amp = Math.max(0.1 * IN, Math.min(1.5 * IN, (d - 1.6 * IN) / 2.4));
+  return { amp, tc: 1.38 * IN + amp * 1.15 };
+}
 
 // ---------------------------------------------------------------------------
 // Custom assets: each primitive's outline and height range, scaled to the item
@@ -558,6 +686,10 @@ const SURFACES = {
   dresser(S, w, d, h) { S.top(-w / 2, 0, w / 2, d - 0.06, h); },
   desk(S, w, d, h) { S.top(-w / 2, 0, w / 2, d, h); },
   box(S, w, d, h) { S.top(-w / 2, 0, w / 2, d, h); },
+  // Over the front of the row, where every book reaches.
+  books(S, w, d, h) { S.top(-w / 2, d * 0.3, w / 2, d, h); },
+  microwave(S, w, d, h) { S.top(-w / 2, 0, w / 2, d - 0.5 * IN, h); },
+  'wall-shelf'(S, w, d, h) { S.top(-w / 2, 0, w / 2, d, h); },
 };
 
 // Custom assets: the top of every upright box or round part at least 5" across.
