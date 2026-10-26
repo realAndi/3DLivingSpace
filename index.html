@@ -748,6 +748,15 @@ h1 a:hover { color: var(--oak); }
             <label class="toggle" id="overlayToggle" hidden><span>Floor plan overlay<span class="why">Plan view, to check the tracing</span></span><input type="checkbox" id="optOverlay"></label>
           </div>
           <div class="group">
+            <h2>Textures</h2>
+            <div class="segmented" id="textureControl" role="radiogroup" aria-label="Texture quality">
+              <button role="radio" data-quality="auto" aria-checked="true">Auto</button>
+              <button role="radio" data-quality="low" aria-checked="false">Low</button>
+              <button role="radio" data-quality="high" aria-checked="false">High</button>
+            </div>
+            <p class="section-note" id="textureNote" style="margin:10px 0 0">Low loads smaller pictures and uses less graphics memory, for phones and tablets.</p>
+          </div>
+          <div class="group">
             <h2>Walk</h2>
             <label class="range-field" for="lookSpeed"><span>Look speed</span><output id="lookSpeedValue">1.0×</output></label>
             <div class="range-row">

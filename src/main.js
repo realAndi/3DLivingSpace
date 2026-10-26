@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { createMaterials } from './materials.js';
+import { bindTextureControl } from './textures.js';
 import { buildArchitecture } from './architecture.js';
 import { buildFixtures } from './fixtures.js';
 import { LayoutEditor } from './layout.js';
@@ -73,7 +74,9 @@ const bgColor = new THREE.Color();
 const pmrem = new THREE.PMREMGenerator(renderer);
 scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
 
-const M = createMaterials(renderer);
+// Textures fill in as their pictures arrive; texture quality is in Tools.
+const M = createMaterials(renderer, { onChange: invalidate });
+bindTextureControl($('#textureControl'), $('#textureNote'));
 
 // The unit on screen: its built data U, and the meshes made from it. All of it
 // is replaced when the unit changes (see showUnit).
