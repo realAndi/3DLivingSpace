@@ -151,11 +151,12 @@ export class Units {
   suggest(copyId, key, { note } = {}) {
     const copy = this.requireEdit(copyId, key);
     const parent = this.#parentOf(copy);
-    if (!this.#changesOf(copy, parent).length) throw new AppError(400, 'Nothing to suggest yet: your version\'s furniture is the same as theirs.');
+    const sent = this.#changesOf(copy, parent).length;
+    if (!sent) throw new AppError(400, 'Nothing to suggest yet: your version\'s furniture is the same as theirs.');
     const base = copy.base ? JSON.parse(copy.base) : null;
     const fields = {
       author: copy.author, title: copy.title, note: text(note, SUGGESTIONS.note),
-      doc: { base: base?.items ?? null, items: copy.doc.items, assets: copy.doc.assets },
+      doc: { base: base?.items ?? null, items: copy.doc.items, assets: copy.doc.assets, sent },
     };
     const open = this.store.latestSuggestionFrom(copy.id);
     if (!(open?.status === 'open' && open.unit_id === parent.id && this.store.resendSuggestion(open.id, fields))) {
@@ -168,8 +169,9 @@ export class Units {
   }
 
   // What a copy has suggested, for its owner: { to: { id, title, author },
-  // status: 'none' | 'open' | 'applied' | 'dismissed', note, changes (how many
-  // it would offer now), sentAt }. `to` is null when it can't suggest.
+  // status: 'none' | 'open' | 'applied' | 'dismissed', note, sent (how many
+  // changes went), changes (how many it would offer now), sentAt }. `to` is
+  // null when it can't suggest.
   mySuggestion(copyId, key) {
     const copy = this.requireEdit(copyId, key);
     let parent;
@@ -178,7 +180,7 @@ export class Units {
     return {
       to: { id: parent.id, title: parent.title, author: parent.author },
       status: s?.unit_id === parent.id ? s.status : 'none',
-      note: s?.note ?? '', sentAt: s?.updated_at ?? null,
+      note: s?.note ?? '', sentAt: s?.updated_at ?? null, sent: s?.unit_id === parent.id ? s.doc.sent ?? null : null,
       changes: this.#changesOf(copy, parent).length,
     };
   }

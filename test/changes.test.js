@@ -73,3 +73,12 @@ test('a copy from before suggestions: no clashes, no removals', () => {
   const groups = layoutChanges({ base: null, theirs, ours: BASE });
   assert.deepEqual(groups.map((g) => [g.id, g.kind, g.conflict]), [['sofa1', 'changed', null]]);
 });
+
+test('what the owner set on a piece since moves with it when the piece moves', () => {
+  const theirs = [BASE[0], moved(BASE[1], 3, 1), moved(BASE[2], 3, 1), BASE[3], BASE[4]];
+  const vase = piece('vase1', 'vase', 10.4, 5, { name: 'Vase', y: 2, on: 'p:table1', w: 0.5, d: 0.5, h: 1 });
+  const { items } = applyChanges({ base: BASE, theirs, ours: [...BASE, vase], select: ['table1'] });
+  const v = items.find((i) => i.uid === 'vase1');
+  assert.ok(Math.abs(v.x - 13.4) < 1e-6 && Math.abs(v.z - 6) < 1e-6, JSON.stringify(v));
+  assert.equal(v.on, 'p:table1');
+});

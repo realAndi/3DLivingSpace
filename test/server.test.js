@@ -478,7 +478,7 @@ test('suggestions: a copy suggests its layout back; the owner applies part of it
   // A visitor makes their own version and rearranges it.
   const copy = await (await api(`api/units/${owner.id}/fork`, { method: 'POST', body: {} })).json();
   const mine = (path, method = 'GET', body) => api(`api/units/${copy.id}/${path}`, { method, key: copy.key, body });
-  assert.deepEqual(await (await mine('suggestion')).json(), { to: { id: owner.id, title: 'Home', author: '' }, status: 'none', note: '', sentAt: null, changes: 0 });
+  assert.deepEqual(await (await mine('suggestion')).json(), { to: { id: owner.id, title: 'Home', author: '' }, status: 'none', note: '', sentAt: null, sent: null, changes: 0 });
   assert.match((await (await mine('suggest', 'POST', {})).json()).error, /Nothing to suggest/);
   await patch(copy, { author: 'Sam', upsert: [
     { uid: 'side0001', type: 'sidetable', x: 33.5, z: 22.5 },
@@ -490,7 +490,7 @@ test('suggestions: a copy suggests its layout back; the owner applies part of it
   await patch(owner, { upsert: [{ uid: 'sofa0001', type: 'sofa', x: 29, z: 22, rot: 180 }] });
 
   const sent = await (await mine('suggest', 'POST', { note: 'Lamp by the window, a plant' })).json();
-  assert.deepEqual([sent.status, sent.changes, sent.note], ['open', 4, 'Lamp by the window, a plant']);
+  assert.deepEqual([sent.status, sent.sent, sent.changes, sent.note], ['open', 4, 4, 'Lamp by the window, a plant']);
   // Sending again updates the one suggestion.
   await mine('suggest', 'POST', { note: 'Lamp by the window, and a plant' });
 

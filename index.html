@@ -734,6 +734,8 @@ h1 a:hover { color: var(--oak); }
   #offerGroup .field input, .field textarea { font-size: 16px; }
   .stage-card { inset: calc(max(12px, var(--safe-t)) + 60px) 12px calc(var(--sheet-peek) + var(--safe-b) + 12px); place-items: start center; }
   .stage.home .toast { bottom: calc(min(60dvh, 520px) + 16px); }
+  /* The open sheet would hide it: above the sheet instead. */
+  .panel.open:not(.welcome-mode) ~ .stage .toast { bottom: calc(min(72dvh, 620px) + var(--safe-b) + 16px); }
   .card { padding: 20px 20px 18px; }
   .card h2 { font-size: 23px; }
   .card p { font-size: 14px; }

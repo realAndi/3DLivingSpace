@@ -617,7 +617,7 @@ export function createSuggestions(opts) {
     ui.withdraw.hidden = st !== 'open';
     const them = to.author || 'They';
     offerStatus(sending ? 'Sending…'
-      : st === 'open' ? `Sent ${plural(changes, 'change')}. Waiting for them. Send again to update it.`
+      : st === 'open' ? `Sent ${plural(mine.sent ?? changes, 'change')}. Waiting for them.${mine.sent != null && changes !== mine.sent ? ' You\'ve changed more since: send again to update it.' : ' Send again to update it.'}`
         : st === 'applied' ? `${them} applied your suggestion.${changes ? ' Send again to suggest more.' : ''}`
           : st === 'dismissed' ? `${them} dismissed your suggestion.${changes ? ' Change it and send it again if you like.' : ''}`
             : changes ? '' : 'Move, add or remove pieces first.');

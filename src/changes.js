@@ -6,6 +6,8 @@
 // Changes are per piece, grouped so a piece goes with what rests on it: a table
 // moved with its lamp is one change. Pure, so the browser previews exactly what
 // the server applies. Layouts are lists of placed items (src/design.js), feet.
+
+import { carry } from './stacking.js';
 //
 // A copy made before suggestions existed has no base: then ours stands in for
 // it, nothing counts as a clash, and nothing is suggested for removal (a piece
@@ -104,16 +106,26 @@ export function layoutChanges({ base = null, theirs = [], ours = [] }) {
 }
 
 // Ours with the chosen groups (their ids, or 'all') taken from theirs:
-// { items, assets, applied: number of groups }. A piece whose support is gone
-// is set on the floor, and the custom pieces it needs come along.
+// { items, assets, applied: number of groups }. The owner's own pieces resting
+// on a piece that moves go with it; a piece whose support is gone is set on
+// the floor; and the custom pieces it needs come along.
 export function applyChanges({ base = null, theirs = [], ours = [], theirAssets = [], ourAssets = [], select = 'all' }) {
   const groups = layoutChanges({ base, theirs, ours });
   const chosen = select === 'all' ? groups : groups.filter((g) => select.includes(g.id));
   const out = new Map(ours.map((i) => [i.uid, { ...i }]));
+  const taken = new Set();
   for (const g of chosen) {
     for (const p of g.pieces) {
+      taken.add(p.uid);
       if (p.theirs) out.set(p.uid, { ...p.theirs });
       else out.delete(p.uid);
+    }
+  }
+  // What the owner has set on a piece that moves (a vase added since) moves with it.
+  for (const g of chosen) {
+    for (const p of g.pieces) {
+      if (!p.theirs || !p.ours) continue;
+      for (const m of carry(p.ours, p.theirs, ours, ourAssets)) if (!taken.has(m.uid) && out.has(m.uid)) Object.assign(out.get(m.uid), m);
     }
   }
   for (const item of out.values()) {
