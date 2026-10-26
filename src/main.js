@@ -24,6 +24,11 @@ import { fmtLen, fmtDims, fmtArea } from './units.js';
 // views (Dollhouse, Plan, Walk), with the furniture planner, the tape measure
 // and the panel around it. The unit is rebuilt whenever it changes on the
 // server, so Claude building it through MCP shows up live.
+//
+// The same page runs as a claude.ai Artifact (its first line sets
+// window.LIVING_SPACE): there the unit lives in the Artifact's own database,
+// through src/claude-store.js, loaded only then and starting now.
+const inClaude = window.LIVING_SPACE === 'artifact' ? import('./claude-store.js') : null;
 
 const DEG = Math.PI / 180;
 const EYE = 5.2;
@@ -125,7 +130,8 @@ function buildPlanOverlay() {
   $('#overlayToggle').hidden = !pi;
   if (!pi) { $('#optOverlay').checked = false; return; }
   if (!planTextures.has(pi.src)) {
-    const tex = new THREE.TextureLoader().load(pi.src, () => invalidate());
+    // A one-file copy of the app carries the picture inline (keyed by its src).
+    const tex = new THREE.TextureLoader().load(globalThis.LIVING_SPACE_PLANS?.[pi.src] ?? pi.src, () => invalidate());
     tex.colorSpace = THREE.SRGBColorSpace;
     tex.anisotropy = 4;
     planTextures.set(pi.src, tex);
@@ -666,9 +672,11 @@ function showUnit(spec, { fresh = false } = {}) {
 }
 
 // ---------------------------------------------------------------------------
-// Units on the server: opening, saving, sharing, view-only, your own version
+// Units on the server (or in an Artifact's database): opening, saving,
+// sharing, view-only, your own version
 let loadedHome = false;
-const session = new UnitSession({
+const Session = inClaude ? (await inClaude).ArtifactSession : UnitSession;
+const session = new Session({
   onLoad: (doc, ss) => {
     // Measurements stay when the same unit comes back (your own copy of it).
     const was = shownSpec;
@@ -806,9 +814,9 @@ function renderSession(ss) {
     $('#noticeCreate').hidden = role !== 'missing';
   }
 
-  // Links
+  // Links (an Artifact has none of its own, and no card to fetch)
   $('#shareGroup').hidden = !ss.id;
-  if (ss.id) {
+  if (ss.id && ss.kind !== 'artifact') {
     ui.viewLink.value = ss.viewUrl();
     const src = `api/units/${ss.id}/card.png?v=${ss.version}`;
     if (ui.card.getAttribute('src') !== src) ui.card.src = src;
@@ -820,7 +828,7 @@ function renderSession(ss) {
   $('#chipEdit').hidden = ss.isExample;
   ui.chip.classList.toggle('with-edit', !ss.isExample);
   $('#unlockGroup').hidden = ss.isExample;
-  if (mine && codeFor !== ss.id) { codeFor = ss.id; renderCode(null); ss.hasCode().then((set) => { if (codeFor === ss.id) renderCode(set); }); }
+  if (mine && codeFor !== ss.id && ss.kind !== 'artifact') { codeFor = ss.id; renderCode(null); ss.hasCode().then((set) => { if (codeFor === ss.id) renderCode(set); }); }
   if (!mine) codeFor = null;
 
   // Your units, here and on the home page
@@ -832,11 +840,55 @@ function renderSession(ss) {
   $$('[data-go="create"], [data-go="example"], [data-go="fork"]').forEach((b) => { b.disabled = ss.busy; });
   ui.homeStatus.dataset.state = ss.error && home ? 'error' : '';
   ui.homeStatus.textContent = home ? (ss.busy ? 'Making your unit…' : ss.error ?? '') : '';
+  if (ss.kind === 'artifact') renderInClaude(ss, empty);
 
   document.title = home ? '3D Living Space' : ss.id ? `${unitName(ss)} · 3D Living Space` : '3D Living Space';
   suggest.sync(ss);
   ready.session = role !== 'loading';
   invalidate();
+}
+
+// As a claude.ai Artifact (src/claude-store.js) there is one unit, shared from
+// claude.ai: editors furnish it; anyone else looks around and can make their
+// own version, which says where they are and offers the way back.
+function renderInClaude(ss, empty) {
+  const own = ss.showing === 'own', editor = ss.role === 'owner' && !own, visitor = ss.role === 'viewer';
+  // Until claude.ai says who is looking, nothing is on offer: an editor would see it flash by.
+  const waiting = visitor && ss.connecting;
+  document.body.dataset.role = own ? 'version' : waiting ? 'connecting' : ss.role;
+  const name = unitName(ss);
+  ui.line.textContent = ss.role === 'loading' ? '' : own ? `Your version of ${name}` : `${name}${ss.author ? ` · by ${ss.author}` : ''}`;
+  ui.lede.textContent = ss.role === 'loading' ? ''
+    : empty ? (editor ? 'Nothing built yet. Ask Claude to build it from your floor plan and photos.' : 'Nothing built yet. It shows up here as soon as Claude builds it.')
+      : editor ? 'Furnish it, measure it and walk through it. Everyone who opens this page sees your changes.'
+        : own ? 'Your own version. Furnish it your way, measure it and walk through it.'
+          : ss.hasVersion ? 'A to-scale model of an apartment. Look around, or open your own version of it.'
+            : 'A to-scale model of an apartment. Look around, then make your own version to furnish it your way.';
+
+  const offer = (visitor || own) && !empty && !waiting;
+  ui.chip.hidden = !offer;
+  ui.chip.classList.remove('with-edit');
+  $('#viewChipTag').textContent = own ? 'Your version' : 'View only';
+  ui.chipText.textContent = name;
+  ui.chip.querySelector('[data-go="fork"]').hidden = own;
+  ui.chip.querySelector('[data-go="original"]').hidden = !own;
+  stage.classList.toggle('visitor', offer);
+  ui.notice.hidden = !visitor || empty || waiting;
+  ui.noticeText.textContent = ss.hasVersion ? 'You have your own version of this unit. Open it to carry on, or look around this one.'
+    : 'You can look around but not change it. Make your own version to move things and add pieces. Only you see it.';
+  $('#shareNoticeText').textContent = ui.noticeText.textContent;
+  for (const b of $$('[data-go="fork"]')) {
+    b.dataset.make ??= b.textContent;
+    b.textContent = !ss.hasVersion ? b.dataset.make : b.closest('.view-chip') ? 'Open yours' : 'Open your version';
+  }
+
+  $('#versionNotice').hidden = !own;
+  $('#versionText').textContent = `Your own version of ${name}. Only you see it, and the original stays as it is.`;
+  const status = $('#versionStatus');
+  status.dataset.state = ss.status === 'error' ? 'error' : '';
+  status.textContent = ss.status === 'saving' ? 'Saving…' : ss.status === 'error' ? (ss.error || 'Not saved.')
+    : ss.ownKept === 'local' ? 'Saved in this browser only. Changes save as you go.' : 'Saved. Changes save as you go.';
+  if (ss.message) { layout.toast(ss.message); ss.message = null; }
 }
 
 function renderUnitList(ul, list, current) {
@@ -876,15 +928,22 @@ document.addEventListener('click', async (e) => {
   if (go === 'home') { if (session.role === 'home') setSheet(narrow()); else session.home({ push: true }); return; }
   if (go === 'retry') { session.retry(); return; }
   if (session.busy) return;
+  // As an Artifact: back from your own version to the unit everyone sees.
+  if (go === 'original') { session.original?.(); return; }
   const doc = go === 'create' ? await session.create()
     : go === 'example' ? await session.create({ from: 'example' })
       : await session.fork();
-  if (doc) {
+  if (doc && session.kind === 'artifact') {
+    const where = { db: 'Your own version. Only you see it, and changes save as you go.', local: 'Your own version, kept in this browser. Changes save as you go.' };
+    if (doc.created && where[session.ownKept]) layout.toast(where[session.ownKept]);
+  } else if (doc) {
     layout.toast(go === 'create' ? 'Your new unit is ready. Build it with Claude.' : 'This copy is yours. Changes save as you go.');
     if (go === 'create' && narrow()) setSheet(false);
   } else if (session.error) layout.toast(session.error);
 });
 $('#homeLink').addEventListener('click', (e) => { e.preventDefault(); if (session.role !== 'home') session.home({ push: true }); });
+// An Artifact has no home page: there the name is only a name.
+if (session.kind === 'artifact') $('#homeLink').replaceWith('3D Living Space');
 
 // ---------------------------------------------------------------------------
 // Edit codes: set one here, then on another device open the unit's link, tap
@@ -954,8 +1013,22 @@ async function copy(text, done) {
     await navigator.clipboard.writeText(text);
     layout.toast(done);
   } catch {
-    window.prompt('Copy this', text);
+    // An Artifact's frame may be kept from the clipboard: copy from a field instead.
+    if (session.kind === 'artifact' && copyFromField(text)) layout.toast(done);
+    else window.prompt('Copy this', text);
   }
+}
+function copyFromField(text) {
+  const field = make('textarea');
+  field.value = text;
+  field.readOnly = true;
+  field.style.cssText = 'position:fixed;top:0;left:0;opacity:0';
+  document.body.append(field);
+  field.select();
+  let ok = false;
+  try { ok = document.execCommand('copy'); } catch { /* not allowed either */ }
+  field.remove();
+  return ok;
 }
 document.addEventListener('click', (e) => {
   const b = e.target.closest('[data-copy]');
