@@ -14,7 +14,10 @@ const KEY = 'livingspace.textures.v1';
 const SETTINGS = ['auto', 'low', 'high'];
 const MAX = { high: 1024, low: 512 };   // file size, and the largest derived map
 const ANISO = { high: 8, low: 4 };
-const DIR = new URL('../assets/tex/', import.meta.url);
+// The pictures sit beside the app, or come inline with a one-file copy of it
+// (skill/3d-living-space/scripts/single.mjs), keyed '512/walnut-color'.
+const INLINE = globalThis.LIVING_SPACE_TEXTURES ?? null;
+const DIR = INLINE ? null : new URL('../assets/tex/', import.meta.url);
 
 let renderer = null, changed = () => {};
 let setting = 'auto', quality = 'high';
@@ -83,7 +86,7 @@ export function fit(img, max) {
 
 // A file under assets/tex/, at the size the quality asks for.
 export function load(name, q = quality) {
-  const url = new URL(`${MAX[q]}/${name}.webp`, DIR).href;
+  const url = INLINE ? INLINE[`${MAX[q]}/${name}`] : new URL(`${MAX[q]}/${name}.webp`, DIR).href;
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.decoding = 'async';
