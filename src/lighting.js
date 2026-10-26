@@ -26,8 +26,8 @@ import { setOutdoor } from './surroundings.js';
 const DEG = Math.PI / 180;
 const LAT = 40 * DEG;            // no location: a mid-latitude city
 const WARM = 0xffdfb8;           // indoor bulbs
-const CAN_CD = 100;              // one can, in the pool's units (feet, decay 2)
-const LAMP_CD = 70;              // one 60 W-equivalent lamp (C1 power 1)
+const CAN_CD = 60;               // one can, in the pool's units (feet, decay 2)
+const LAMP_CD = 26;              // one 60 W-equivalent lamp (C1 power 1)
 const PLATE_Y = 4;               // switch plates' centers, 48" up
 const SWINGS = new Set(['door', 'entry', 'double']);
 
@@ -67,8 +67,8 @@ function planDir(out, bearing, el) {
 
 // How each view is lit by day and by night. Plan is always the same daylight.
 const LOOK = {
-  dollhouse: { sun: 2.3, hemi: 1.35, env: 0.45, moon: 0.6, hemiNight: 0.7, envNight: 0.1, exposureNight: 1.0, floorGlow: 1.25 },
-  walk: { sun: 3.2, hemi: 1.25, env: 0.6, moon: 0, hemiNight: 0.07, envNight: 0.035, exposureNight: 1.2, floorGlow: 1.0 },
+  dollhouse: { sun: 2.3, hemi: 1.35, env: 0.45, moon: 0.6, hemiNight: 0.7, envNight: 0.1, exposureNight: 1.0, floorGlow: 1.0, lights: 1.4 },
+  walk: { sun: 3.2, hemi: 1.25, env: 0.6, moon: 0, hemiNight: 0.07, envNight: 0.035, exposureNight: 1.1, floorGlow: 0.8, lights: 1 },
 };
 const PLAN = { az: 200, el: 72, sun: 1.7, hemi: 1.6, env: 0.4 };
 
@@ -204,15 +204,16 @@ export function createLighting({ renderer, scene, M, coarse, invalidate }) {
   // ceiling's halos and bounced light. The floor brightens what is there
   // (dst × (1 + glow)); the ceiling adds its light.
   const glowShader = (channel, blending) => new THREE.ShaderMaterial({
-    uniforms: { map: { value: null }, box: { value: new THREE.Vector4(0, 0, 1, 1) }, color: { value: new THREE.Color(0xffd6ae) }, gain: { value: 1 } },
+    uniforms: { map: { value: null }, box: { value: new THREE.Vector4(0, 0, 1, 1) }, color: { value: new THREE.Color(0xffd6ae) }, gain: { value: 1 }, cap: { value: 1 } },
     vertexShader: 'varying vec2 vXZ; void main(){ vec4 w = modelMatrix * vec4(position, 1.0); vXZ = w.xz; gl_Position = projectionMatrix * viewMatrix * w; }',
-    fragmentShader: `uniform sampler2D map; uniform vec4 box; uniform vec3 color; uniform float gain; varying vec2 vXZ;
-      void main(){ float g = texture2D(map, (vXZ - box.xy) / box.zw).${channel} * 4.0; gl_FragColor = vec4(color * min(g * gain, 1.6), 1.0); }`,
+    fragmentShader: `uniform sampler2D map; uniform vec4 box; uniform vec3 color; uniform float gain; uniform float cap; varying vec2 vXZ;
+      void main(){ float g = texture2D(map, (vXZ - box.xy) / box.zw).${channel} * 4.0; gl_FragColor = vec4(color * min(g * gain, cap), 1.0); }`,
     transparent: true, depthWrite: false, ...blending,
   });
   const floorMat = glowShader('r', { blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.DstColorFactor, blendDst: THREE.OneFactor });
   const ceilMat = glowShader('g', { blending: THREE.AdditiveBlending });
   ceilMat.uniforms.color.value.set(0xffe2bd);
+  ceilMat.uniforms.cap.value = 0.45;
   const hidden = new THREE.MeshBasicMaterial();
 
   // ---------------------------------------------------------------- state
@@ -541,24 +542,39 @@ export function createLighting({ renderer, scene, M, coarse, invalidate }) {
     };
     lit.sort((p, q) => dist(p) - dist(q));
     const N = mode === 'plan' ? 0 : pool.length, units = [];
-    const take = (u) => { if (units.length < N) { units.push(u); u.members.forEach((m) => { m.covered = true; }); } };
+    const take = (u, room) => { if (units.length < N) { units.push(Object.assign(u, { room })); u.members.forEach((m) => { m.covered = true; }); } };
     const near = (L) => Math.hypot(L.x - focusPt.x, L.z - focusPt.z);
     for (const r of lit) {
       if (units.length >= N) break;
       const lampsHere = [...r.lamps].sort((p, q) => near(p) - near(q));
       if (r.i === focus && mode === 'walk') {
         const forLamps = Math.min(lampsHere.length, Math.max(0, N - units.length - (r.cans.length ? 1 : 0)));
-        lampsHere.slice(0, forLamps).forEach((L) => take(lampLight(L)));
+        lampsHere.slice(0, forLamps).forEach((L) => take(lampLight(L), r.i));
         if (r.cans.length) {
           const k = clamp(N - units.length - (N >= 6 ? 2 : 0), 1, r.cans.length);
-          clusters(r.cans, k).forEach((c) => take(canLight(c)));
+          clusters(r.cans, k).forEach((c) => take(canLight(c), r.i));
         }
-        lampsHere.slice(forLamps).forEach((L) => take(lampLight(L)));
+        lampsHere.slice(forLamps).forEach((L) => take(lampLight(L), r.i));
       } else {
-        if (r.cans.length) take(canLight(r.cans));
-        lampsHere.forEach((L) => take(lampLight(L)));
+        if (r.cans.length) take(canLight(r.cans), r.i);
+        lampsHere.forEach((L) => take(lampLight(L), r.i));
       }
     }
+    // A room with a real light carries all of its own: what's left over in it
+    // adds to its nearest real light. Faking it with a pool on a floor that is
+    // already lit would light the room twice (phones, with fewer lights, washed
+    // out), so only rooms without a real light get the fakes.
+    for (const r of lit) {
+      const mine = units.filter((u) => u.room === r.i);
+      if (!mine.length) continue;
+      const left = [...r.cans.filter((c) => !c.covered).map((s) => [s, CAN_CD]), ...r.lamps.filter((L) => !L.covered).map((s) => [s, LAMP_CD * (s.emitter.power ?? 1)])];
+      for (const [s, cd] of left) {
+        const u = mine.reduce((a, b) => (Math.hypot(b.x - s.x, b.z - s.z) < Math.hypot(a.x - s.x, a.z - s.z) ? b : a));
+        u.cd += cd;
+        s.covered = true;
+      }
+    }
+    const gain = LOOK[mode]?.lights ?? 0;
     pool.forEach((s, k) => {
       const u = units[k];
       if (!u) { s.intensity = 0; return; }
@@ -566,7 +582,7 @@ export function createLighting({ renderer, scene, M, coarse, invalidate }) {
       s.target.position.set(u.x, u.y + u.dir * 4, u.z);
       s.target.updateMatrixWorld();
       s.color.set(u.color);
-      s.intensity = u.cd;
+      s.intensity = u.cd * gain;
       s.angle = u.angle;
       s.penumbra = u.penumbra;
       s.distance = u.dist;
@@ -578,13 +594,13 @@ export function createLighting({ renderer, scene, M, coarse, invalidate }) {
     bake();
   }
 
-  // One can, or several sharing a light: raised by half their spread so the
+  // One can, or several sharing a light: raised by a quarter of their spread so the
   // pool spreads as theirs would, rather than one hot spot in the middle.
   function canLight(cans) {
     let x = 0, z = 0, y = Infinity;
     for (const c of cans) { x += c.x / cans.length; z += c.z / cans.length; y = Math.min(y, c.y); }
     const spread = Math.max(0, ...cans.map((c) => Math.hypot(c.x - x, c.z - z)));
-    const lift = spread * 0.5, k = (y + lift) / y;
+    const lift = spread * 0.25, k = (y + lift) / y;
     return {
       x, y: y + lift, z, dir: -1, color: WARM, cd: CAN_CD * (1 + 0.6 * (cans.length - 1)) * k * k, members: cans,
       angle: Math.min(78, 60 + Math.atan(spread / Math.max(1, y)) / DEG) * DEG, penumbra: 0.8, dist: (y + lift) * 1.45 + spread,
@@ -615,13 +631,13 @@ export function createLighting({ renderer, scene, M, coarse, invalidate }) {
     let any = false, anyCeil = false;
     const srcs = rooms.map((R, i) => {
       const src = [];
-      if (isRoomOn(R.room.id)) for (const c of R.cans) src.push({ x: c.x, z: c.z, h: c.y, p: 1, floor: c.covered ? 0 : 1, cone: true, halo: 1, haloR: 0.75, wide: 0.3 });
+      if (isRoomOn(R.room.id)) for (const c of R.cans) src.push({ x: c.x, z: c.z, h: c.y, p: 1, floor: c.covered ? 0 : 1, cone: true, halo: 0.6, haloR: 0.7, wide: 0.1 });
       for (const [uid, L] of lamps) {
         if (L.room !== i || !isLampOn(uid)) continue;
         const shape = L.emitter.shape ?? 'shade', p = L.emitter.power ?? 1, hc = Math.max(0.5, R.room.ceiling - L.y);
         src.push({
           x: L.x, z: L.z, h: Math.max(0.5, L.y), p, floor: L.covered ? 0 : p * (shape === 'up' ? 0.3 : 0.75), cone: false,
-          halo: p * (shape === 'up' ? 0.9 : shape === 'shade' ? 0.45 : 0.1), haloR: hc * 0.8, wide: 0,
+          halo: p * (shape === 'up' ? 0.5 : shape === 'shade' ? 0.2 : 0.06), haloR: hc * 0.8, wide: 0,
         });
       }
       return src;
@@ -633,7 +649,7 @@ export function createLighting({ renderer, scene, M, coarse, invalidate }) {
       let fill = fills[i];
       for (const j of R.open ?? []) { src.push(...srcs[j]); fill = Math.max(fill, fills[j] * 0.6); }
       if (!src.length) return;
-      const bounced = fill * 0.3;
+      const bounced = fill * 0.15;
       for (const t of R.texels) {
         const x = x0 + ((t % nx) + 0.5) * res, z = z0 + (Math.floor(t / nx) + 0.5) * res;
         let f = 0, c = bounced;
