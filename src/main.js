@@ -14,6 +14,7 @@ import { createLightPanel } from './lightpanel.js';
 import { actOf } from './catalog.js';
 import { WalkControls } from './walk.js';
 import { Interactions } from './interact.js';
+import { createSuggestions } from './suggestions.js';
 import { buildUnit, cleanUnit, emptyUnit } from './unit.js';
 import { pointInPoly, distToSegment, parseFeetInches } from './geometry.js';
 import * as units from './units.js';
@@ -196,6 +197,7 @@ function isBlocked(x, z, r) {
   if (!U.insideUnit(x, z)) return true;
   if (U.obstacles.some((b) => inRect(x, z, b, r))) return true;
   if (furniture.visible && layout.blocks(x, z, r * 0.6)) return true;
+  if (suggest.blocks(x, z, r * 0.6)) return true;
   return doors.some((d) => d.angle < 20 && nearPoly(x, z, d.closedPoly, r));
 }
 
@@ -467,14 +469,37 @@ const layout = new LayoutEditor({
     openTab('t-furniture');
     $('#pieceEditor').scrollIntoView({ block: 'nearest' });
   },
-  onFocusPiece: (item) => {
-    if (!item) return;
-    if (narrow()) setSheet(false);
-    const t = new THREE.Vector3(item.x, 0, item.z);
-    if (mode === 'plan') tweenOrbit(plan, planCam, t, new THREE.Vector3(item.x, planCam.position.y, item.z));
-    else if (mode === 'dollhouse') tweenOrbit(doll, dollCam, t, dollCam.position.clone().add(t.clone().sub(doll.target)));
-  },
+  onFocusPiece: focusPiece,
 });
+
+// Frame a piece: Plan and Dollhouse glide over to it, Walk turns to face it.
+// `close` comes in near enough to see it from an overview, and in Dollhouse
+// looks down at it from the middle of its room, so its room's walls don't hide it.
+function focusPiece(item, { close = false } = {}) {
+  if (!item) return;
+  if (narrow()) setSheet(false);
+  const t = new THREE.Vector3(item.x, 0, item.z);
+  if (mode === 'plan') {
+    const zoom = close ? clamp(planCam.zoom, Math.min(2.2, plan.maxZoom), plan.maxZoom) : undefined;
+    tweenOrbit(plan, planCam, t, new THREE.Vector3(item.x, planCam.position.y, item.z), zoom);
+  } else if (mode === 'dollhouse') {
+    const back = dollCam.position.clone().sub(doll.target);
+    if (close) {
+      const r = U.roomAt(item.x, item.z);
+      const side = r ? new THREE.Vector2((r.bbox[0] + r.bbox[2]) / 2 - item.x, (r.bbox[1] + r.bbox[3]) / 2 - item.z) : new THREE.Vector2();
+      if (side.length() < 0.5) side.set(back.x, back.z);
+      side.normalize();
+      const up = 55 * DEG, dist = Math.min(back.length(), 34 * Math.max(1, SIZE.k));
+      back.set(side.x * Math.cos(up), Math.sin(up), side.y * Math.cos(up)).multiplyScalar(dist);
+    }
+    tweenOrbit(doll, dollCam, t, t.clone().add(back));
+  } else if (mode === 'walk') {
+    const dx = item.x - walk.x, dz = item.z - walk.z, mid = (item.y ?? 0) + item.h / 2;
+    const pitch = clamp(Math.atan2(mid - walk.y, Math.max(0.5, Math.hypot(dx, dz))) / DEG, -50, 30);
+    walk.setPose({ x: walk.x, y: walk.y, z: walk.z, yaw: Math.atan2(dx, -dz) / DEG, pitch }, { animate: true, duration: 0.7 });
+  }
+  invalidate();
+}
 
 // ---------------------------------------------------------------------------
 // Tape measure (every view)
@@ -494,7 +519,7 @@ const tape = new TapeMeasure({
 const tapeBtn = $('#tapeBtn'), tapeBar = $('#tapeBar');
 function setMeasuring(on) {
   tape.setActive(on);
-  layout.enabled = !on;
+  layout.enabled = !on && !suggest.active;
   if (on) { layout.select(null); dismissHint(); if (narrow()) setSheet(false); }
 }
 function renderTapeUI() {
@@ -647,6 +672,7 @@ const session = new UnitSession({
   onLoad: (doc, ss) => {
     // Measurements stay when the same unit comes back (your own copy of it).
     const was = shownSpec;
+    suggest.reset();
     showUnit(doc?.unit ?? null, { fresh: true });
     if (shownSpec !== was) tape.clear();
     renderTapeUI();
@@ -668,8 +694,25 @@ const session = new UnitSession({
   onRemote: (doc, ss) => {
     if (doc.unitRev !== ss.unitRev) showUnit(doc.unit);
     layout.applyRemote(doc, ss.pendingUids());
+    suggest.layoutChanged();
   },
   onState: (ss) => renderSession(ss),
+});
+
+// Suggestions from copies of this unit, previewed one at a time in place of
+// the real furniture; and a copy suggesting its own layout back (src/suggestions.js).
+const suggest = createSuggestions({
+  M, scene, layout, session, accent: accentMat, invalidate, focus: (item) => focusPiece(item, { close: true }),
+  getU: () => U,
+  openTab: (id) => openTab(id),
+  closeSheet: () => { if (narrow()) setSheet(false); },
+  onPreview: (on) => {
+    furniture.visible = $('#optFurniture').checked && !on;
+    layout.enabled = !on && !tape.active;
+    if (on) { layout.select(null); dismissHint(); if (narrow()) setSheet(false); }
+    stage.classList.toggle('previewing', on);
+    invalidate();
+  },
 });
 
 const BUILD_PROMPT = 'Build my apartment in 3D Living Space from the floor plan and photos I\'m sharing. Work to scale: get the scale from the room sizes printed on the plan, trace each room as the clear floor inside its walls, then add every door (with the way it swings), the windows, the kitchen cabinets and appliances, the bathroom fixtures, closets and laundry, and the finishes you can see in the photos. Fix every problem the tools report, then tell me what you couldn\'t see and what you assumed.';
@@ -791,6 +834,7 @@ function renderSession(ss) {
   ui.homeStatus.textContent = home ? (ss.busy ? 'Making your unit…' : ss.error ?? '') : '';
 
   document.title = home ? '3D Living Space' : ss.id ? `${unitName(ss)} · 3D Living Space` : '3D Living Space';
+  suggest.sync(ss);
   ready.session = role !== 'loading';
   invalidate();
 }
@@ -1092,6 +1136,7 @@ function setMode(m, { keepHash = false } = {}) {
   const inside = m === 'walk';
   applyModeVisibility();
   layout.setView(m);
+  suggest.setView(m);
   lighting.setMode(m);
   document.querySelectorAll('.mode').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.mode === m)));
   $('#minimap').hidden = !inside;
@@ -1185,7 +1230,9 @@ function openTab(id) {
 document.querySelectorAll('.tab').forEach((t) => t.addEventListener('click', () => openTab(t.id)));
 
 $('#optFurniture').addEventListener('change', (e) => {
-  furniture.visible = e.target.checked;
+  // A suggestion's preview stands in for the furniture while it's open.
+  furniture.visible = e.target.checked && !suggest.active;
+  suggest.root.visible = e.target.checked;
   layout.select(null);
   invalidate();
 });
@@ -1329,7 +1376,7 @@ renderTapeUI();
 // Small hook for scripted screenshots and tests.
 window.app = {
   ready: false,
-  setMode, focusRoom, toggleDoor, invalidate, walk, setSheet, layout, session, tape, units, lighting, things, interact,
+  setMode, focusRoom, toggleDoor, invalidate, walk, setSheet, layout, session, tape, units, lighting, things, interact, suggest,
   get doors() { return doors; },
   get movers() { return fixtures?.movers ?? []; },
   get U() { return U; },
