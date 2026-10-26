@@ -24,6 +24,9 @@ const TYPE_FILL = {
   coffeetable: '#8a6a4f', sidetable: '#8a6a4f', tvstand: '#7b5a3e', bookshelf: '#7b5a3e', table: '#8a6a4f', roundtable: '#8a6a4f',
   chair: '#7b5a3e', bench: '#8a6a4f', nightstand: '#7b5a3e', dresser: '#7b5a3e', desk: '#8a6a4f', officechair: '#4f4c48',
   lamp: '#efe3c8', plant: '#7f9668', box: '#c4bcae',
+  'table-lamp': '#efe3c8', books: '#8d6f5a', vase: '#cfd6d2', 'plant-small': '#7f9668', plates: '#f2efe9', laptop: '#5c6066',
+  microwave: '#4a4c4f', 'coffee-maker': '#3a3b3d', 'wall-art': '#c9b79c', mirror: '#c8d2d8', 'wall-shelf': '#8a6a4f',
+  'wall-tv': '#26282b', sconce: '#efe3c8', curtains: '#e6dfd2', blinds: '#ddd6ca', pendant: '#efe3c8', 'ceiling-fan': '#bdb6aa',
 };
 // Kitchen parts worth naming on the detail plan, long and short.
 const SEGMENT_LABEL = { fridge: ['FRIDGE', 'F'], range: ['RANGE', 'R'], cooktop: ['COOK', 'C'], sink: ['SINK', 'S'], dishwasher: ['DW', 'D'], oven: ['OVEN', 'O'], pantry: ['PANTRY', 'P'], drawers: ['DRW', ''], open: ['OPEN', ''] };
@@ -93,8 +96,11 @@ function planGroup(doc, U, [bx, by, bw, bh], { detail = false } = {}) {
   const line = (p, q, attrs) => { const [a, c] = [P(...p), P(...q)]; return `<line x1="${f1(a[0])}" y1="${f1(a[1])}" x2="${f1(c[0])}" y2="${f1(c[1])}" ${attrs}/>`; };
   const rect = ([x0, z0, x1, z1], attrs) => `<rect x="${f1(ox + x0 * s)}" y="${f1(oz + z0 * s)}" width="${f1((x1 - x0) * s)}" height="${f1((z1 - z0) * s)}" ${attrs}/>`;
   const out = [];
-  const items = [...(doc.items ?? [])].sort((p, q) => Number(isFlat(q)) - Number(isFlat(p)));
   const assets = Object.fromEntries((doc.assets ?? []).map((a) => [a.id, a]));
+  // Bottom up: rugs, pieces on the floor, what rests on them (lowest first),
+  // what hangs on the walls, then what hangs from the ceiling.
+  const tier = (it) => (isFlat(it) ? 0 : !it.on ? 1 : it.on === 'wall' ? 3 : it.on === 'ceiling' ? 4 : 2);
+  const items = [...(doc.items ?? [])].sort((p, q) => tier(p) - tier(q) || (p.y ?? 0) - (q.y ?? 0));
 
   if (detail) {
     // A 1' grid with inch coordinates every 5', so an agent can read positions off the picture.
@@ -186,9 +192,14 @@ function planGroup(doc, U, [bx, by, bw, bh], { detail = false } = {}) {
   };
   if (detail) { drawWalls(); drawOpenings(); } else drawSwings();
 
-  // Furniture: rugs first, then everything else; a darker edge marks each front.
+  // Furniture, bottom up; a darker edge marks each front. What hangs from the
+  // ceiling is a dashed outline, so what's under it still shows.
   for (const it of items) {
     const poly = footprint(it);
+    if (it.on === 'ceiling') {
+      out.push(`<polygon points="${pts(poly)}" fill="${fillFor(it, assets)}" fill-opacity="0.25" stroke="${C.ink}" stroke-opacity="0.6" stroke-width="${detail ? 1.3 : 1}" stroke-dasharray="${detail ? '5 4' : '4 3'}"/>`);
+      continue;
+    }
     out.push(`<polygon points="${pts(poly)}" fill="${fillFor(it, assets)}" stroke="${C.ink}" stroke-opacity="0.55" stroke-width="${detail ? 1.3 : 1}" fill-opacity="${isFlat(it) ? 0.85 : 1}"/>`);
     out.push(line(poly[2], poly[3], `stroke="${C.oak}" stroke-width="${detail ? 3 : 2.2}"`));
   }
@@ -259,14 +270,24 @@ function planGroup(doc, U, [bx, by, bw, bh], { detail = false } = {}) {
 
   for (const it of items) {
     const [cx, cz] = P(it.x, it.z);
-    const ink = isFlat(it) ? C.ink : inkOn(fillFor(it, assets));
-    out.push(text(cx, cz - 2, it.name, { size: 12, bold: true, fill: ink, anchor: 'middle' }));
-    out.push(text(cx, cz + 11, it.uid, { size: 10.5, mono: true, fill: ink, anchor: 'middle' }));
+    // What rests on a piece or hangs from the ceiling is labeled by id alone
+    // (they crowd the piece under them); the rest by name and id.
+    if (it.on && it.on !== 'wall') {
+      const below = it.on === 'ceiling' ? Math.max(...footprint(it).map(([x, z]) => P(x, z)[1])) + 10 : cz + 3.5;
+      out.push(text(cx, below, it.uid, { size: 9.5, mono: true, fill: C.ink, anchor: 'middle', halo }));
+      continue;
+    }
+    const wall = it.on === 'wall';
+    const ink = isFlat(it) || wall ? C.ink : inkOn(fillFor(it, assets));
+    const h = wall ? halo : null, size = wall ? 10.5 : 12;
+    out.push(text(cx, cz - 2, it.name, { size, bold: true, fill: ink, anchor: 'middle', halo: h }));
+    out.push(text(cx, cz + size - 1, it.uid, { size: size - 1.5, mono: true, fill: ink, anchor: 'middle', halo: h }));
   }
 
-  // North.
+  // North: where the unit says true north is (up the plan unless set).
   const [nx, ny] = [bx + bw - 18, by + 26];
-  out.push(`<path d="M${nx} ${ny - 18} l7 16 l-7 -5 l-7 5 z" fill="${C.ink2}"/>`, text(nx, ny + 12, 'N', { size: 12, bold: true, fill: C.ink2, anchor: 'middle' }));
+  const north = U.north ?? 0;
+  out.push(`<g transform="rotate(${f1(north)} ${nx} ${ny - 4})"><path d="M${nx} ${ny - 18} l7 16 l-7 -5 l-7 5 z" fill="${C.ink2}"/></g>`, text(nx, ny + 12, 'N', { size: 12, bold: true, fill: C.ink2, anchor: 'middle' }));
   return out.join('\n');
 }
 
@@ -316,7 +337,7 @@ export function detailSvg(doc, U) {
 <rect width="${W}" height="${H}" fill="${C.paper}"/>
 ${text(24, 32, `${doc.title || 'Untitled unit'}${sub ? `  ·  ${sub}` : ''}`, { size: 19, bold: true })}
 ${text(24, 56, 'Plan view, north up. Inches: x east (left to right), z south (top to bottom); grid 1 ft, numbers every 5 ft.', { size: 12.5, mono: true, fill: C.ink2 })}
-${text(24, 76, 'Blue = windows, arcs = door swings, gray = fixtures (dashed: wall-hung), orange edge = front of a piece.', { size: 12.5, mono: true, fill: C.ink2 })}
+${text(24, 76, 'Blue = windows, arcs = door swings, gray = fixtures (dashed: wall-hung), orange edge = front of a piece, dashed piece = from the ceiling.', { size: 12.5, mono: true, fill: C.ink2 })}
 ${U.empty ? nothingYet(box, 'Call build_unit with the rooms from the floor plan.') : planGroup(doc, U, box, { detail: true })}
 </svg>`;
 }

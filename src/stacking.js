@@ -67,14 +67,15 @@ const fixtureCache = new WeakMap();
 function fixtureSurfaceList(U) {
   if (!U) return [];
   if (!fixtureCache.has(U)) {
-    fixtureCache.set(U, U.fixtures.flatMap((f) => fixtureSurfaces(f).map((s) => ({ ...s, on: `f:${f.id}`, name: f.name }))));
+    fixtureCache.set(U, U.fixtures.flatMap((f) => fixtureSurfaces(f).map((s) => ({ ...s, on: `f:${f.id}`, name: f.name, rot: f.rot }))));
   }
   return fixtureCache.get(U);
 }
 
-// Every surface of a support: [{ poly, aabb, y, clear, on, name }], lowest first.
+// Every surface of a support: [{ poly, aabb, y, clear, on, name, rot }],
+// lowest first; rot is the way the support faces.
 export function surfacesOf(support, U = null, assets = null) {
-  if (support.kind === 'piece') return pieceSurfaces(support.piece, assets).map((s) => ({ ...s, on: `p:${support.piece.uid}`, name: support.piece.name }));
+  if (support.kind === 'piece') return pieceSurfaces(support.piece, assets).map((s) => ({ ...s, on: `p:${support.piece.uid}`, name: support.piece.name, rot: support.piece.rot }));
   if (support.kind === 'fixture') return fixtureSurfaceList(U).filter((s) => s.on === `f:${support.fixture.id}`);
   return [];
 }
@@ -87,7 +88,7 @@ export function surfacesAt(x, z, { items = [], U = null, assets = null, exclude 
   for (const s of fixtureSurfaceList(U)) if (inside(s)) out.push(s);
   for (const p of items) {
     if (exclude.has(p.uid)) continue;
-    for (const s of pieceSurfaces(p, assets)) if (inside(s)) out.push({ ...s, on: `p:${p.uid}`, name: p.name });
+    for (const s of pieceSurfaces(p, assets)) if (inside(s)) out.push({ ...s, on: `p:${p.uid}`, name: p.name, rot: p.rot });
   }
   return out.sort((a, b) => b.y - a.y);
 }
@@ -225,7 +226,9 @@ export const ceilingY = (item, U) => round(Math.max(0, ceilingAt(item.x, item.z,
 // Where a piece goes by default, from its type: on a surface under (x, z) if
 // it's a surface piece and there is one, on the nearest wall, on the ceiling,
 // or on the floor. Returns the changes { x, z, y, on, rot }, with on: null
-// for the floor; or null for a wall piece with no wall nearby.
+// for the floor (and face, the way a surface's support faces, for a piece
+// set down new to face the same way); or null for a wall piece with no wall
+// nearby.
 export function placeByType(item, { items = [], U = null, assets = null } = {}) {
   const place = placeOf(item, assets);
   if (place === 'wall') {
@@ -239,27 +242,34 @@ export function placeByType(item, { items = [], U = null, assets = null } = {}) 
     for (const s of surfacesAt(item.x, item.z, { items, U, assets, exclude })) {
       if (item.h > s.clear + EPS) continue;
       const p = fitOnSurface(item, s);
-      if (p) return { ...p, y: s.y, on: s.on };
+      if (p) return { ...p, y: s.y, on: s.on, face: s.rot ?? 0 };
     }
   }
   return { x: item.x, z: item.z, y: 0, on: null };
 }
 
-// Rest a piece on a support's surface: the surface under (x, z) nearest the
-// height `y` (or the top), the piece pulled in to fit on it. Returns
-// { x, z, y, on } or a sentence saying why not.
+// Rest a piece on a support's surface: the surfaces under (x, z) (or all of
+// them), nearest the height `y` or else the highest it fits under, the
+// biggest first; the piece pulled in to fit on the first that holds it.
+// Returns { x, z, y, on, face } (face: the way the support faces) or a
+// sentence saying why not.
 export function restOn(item, support, { x = item.x, z = item.z, y = null, U = null, assets = null } = {}) {
   const list = surfacesOf(support, U, assets);
-  if (!list.length) return `${support.piece?.name ?? support.fixture?.name ?? 'That'} has no top or shelf to put things on.`;
+  const name = support.piece?.name ?? support.fixture?.name ?? 'That';
+  if (!list.length) return `${name} has no top or shelf to put things on.`;
   const under = list.filter((s) => pointInPoly(x, z, s.poly));
-  const pool = under.length ? under : list;
-  const pick = y === null
-    ? pool.filter((s) => item.h <= s.clear + EPS).at(-1) ?? pool.at(-1)
-    : pool.reduce((a, b) => (Math.abs(b.y - y) < Math.abs(a.y - y) ? b : a));
-  const at = under.includes(pick) ? { x, z } : centerOf(pick.poly);
-  const p = fitOnSurface({ ...item, ...at }, pick);
-  if (!p) return `${item.name ?? 'It'} is too big to fit on ${pick.name}.`;
-  return { x: round(p.x), z: round(p.z), y: round(pick.y), on: pick.on };
+  const area = (s) => (s.aabb[2] - s.aabb[0]) * (s.aabb[3] - s.aabb[1]);
+  const fits = (s) => item.h <= s.clear + EPS;
+  const order = (y === null
+    ? [...under].sort((a, b) => Number(fits(b)) - Number(fits(a)) || b.y - a.y || area(b) - area(a))
+    : [...under].sort((a, b) => Math.abs(a.y - y) - Math.abs(b.y - y) || area(b) - area(a)));
+  // Then the rest, in the same order, centered on each.
+  const rest = list.filter((s) => !under.includes(s)).sort((a, b) => (y === null ? Number(fits(b)) - Number(fits(a)) || b.y - a.y : Math.abs(a.y - y) - Math.abs(b.y - y)) || area(b) - area(a));
+  for (const s of [...order, ...rest]) {
+    const p = fitOnSurface({ ...item, ...(under.includes(s) ? { x, z } : centerOf(s.poly)) }, s);
+    if (p) return { x: round(p.x), z: round(p.z), y: round(s.y), on: s.on, face: s.rot ?? 0 };
+  }
+  return `${item.name ?? 'It'} is too big to fit on ${name}.`;
 }
 
 const centerOf = (poly) => ({ x: poly.reduce((a, p) => a + p[0], 0) / poly.length, z: poly.reduce((a, p) => a + p[1], 0) / poly.length });

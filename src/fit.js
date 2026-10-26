@@ -119,13 +119,27 @@ function meets(a, b, tol = 0.04) {
   return false;
 }
 
-// A convex outline with its corners pulled in toward its middle by up to r.
+// A convex outline with each corner moved in by r from both of its edges
+// (at most halfway across, so a 1½" deep picture frame stays a strip along
+// its wall instead of its corners sliding toward the middle).
 function inset(poly, r) {
-  const cx = poly.reduce((a, p) => a + p[0], 0) / poly.length, cz = poly.reduce((a, p) => a + p[1], 0) / poly.length;
-  return poly.map(([x, z]) => {
-    const dx = cx - x, dz = cz - z, len = Math.hypot(dx, dz);
-    const k = len > 1e-9 ? Math.min(1, r / len) : 0;
-    return [x + dx * k, z + dz * k];
+  const n = poly.length;
+  let area = 0;
+  for (let i = 0; i < n; i++) { const [x0, z0] = poly[i], [x1, z1] = poly[(i + 1) % n]; area += x0 * z1 - x1 * z0; }
+  const sign = area >= 0 ? 1 : -1;
+  // Inward unit normal of edge i (from corner i to i + 1), and the outline's thickness across it.
+  const normal = (i) => {
+    const [x0, z0] = poly[i], [x1, z1] = poly[(i + 1) % n], len = Math.hypot(x1 - x0, z1 - z0) || 1;
+    return [(-(z1 - z0) / len) * sign, ((x1 - x0) / len) * sign];
+  };
+  const across = (i) => {
+    const [nx, nz] = normal(i), [x0, z0] = poly[i];
+    return Math.max(...poly.map(([x, z]) => (x - x0) * nx + (z - z0) * nz));
+  };
+  return poly.map(([x, z], i) => {
+    const a = normal((i + n - 1) % n), b = normal(i);
+    const ra = Math.min(r, across((i + n - 1) % n) / 2), rb = Math.min(r, across(i) / 2);
+    return [x + a[0] * ra + b[0] * rb, z + a[1] * ra + b[1] * rb];
   });
 }
 

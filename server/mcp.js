@@ -9,13 +9,15 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { z } from 'zod';
-import { CATALOG, catalogByType, SWATCHES, isFlat } from '../src/catalog.js';
+import { CATALOG, catalogByType, SWATCHES, isFlat, placeOf, KINDS, PLACES } from '../src/catalog.js';
 import { cleanAsset, cleanItem, randomId, SHAPES, FINISHES, LIMITS } from '../src/design.js';
+import { holdsItems } from '../src/parts.js';
+import { placeByType, restOn, hangOnWall, ceilingY, carry, descendants } from '../src/stacking.js';
 import {
   ROOM_KINDS, FLOORS, OPENING_TYPES, FIXTURES, fixtureByType, SEGMENTS, FIXTURE_OPTIONS, FINISH_OPTIONS, UNIT_LIMITS,
   cleanUnit, buildUnit, fromInches, toInches, snapToWall,
 } from '../src/unit.js';
-import { problems, clearances, findSpots, settleOffWalls } from '../src/fit.js';
+import { problems, clearances, findSpots, settleOffWalls, onFloor } from '../src/fit.js';
 import { AppError, json, readBody, limit } from './http.js';
 import { detailSvg, png } from './render.js';
 import { EXAMPLE_ID } from './service.js';
@@ -32,6 +34,8 @@ Building a unit from a floor plan and photos:
 5. Set finishes from the photos: floors per room, wall paint, cabinets, counters, backsplash, appliances, hardware. Ask the person to look at it in 3D and tell you what is off.
 
 Furnishing: pick pieces from get_catalog and place them with place_items; for anything the catalog lacks, build it with create_asset and place it. Leave 30 to 36 in to walk, keep door swings clear, and check with check_unit and render_plan. find_spots suggests where a footprint fits. Pieces overlap only where their parts do, at the same height, so tuck them in the way real furniture goes: a dining chair's seat under the table up to its back (about 19 in for the catalog chair), a desk chair under the desk, stools under an island's overhang, a lamp's shade over a sofa's arm, a table in a sectional's open corner.
+
+Decorating: every catalog piece has a placement. Floor pieces stand on the floor. Surface pieces (table lamps, books, a vase, plates, a laptop, a coffee maker) rest on a placed piece or a counter: pass on with the piece's or fixture's id (at says where on it; elevation picks a bookshelf's shelf), or just an at over it. Wall pieces (art, mirrors, a wall TV, sconces, wall shelves, curtains, blinds) hang with their back against the wall nearest at, facing into the room; elevation is the height of their underside: center art about 57 to 60 in up, a TV about 42 to 50 in, sconces about 66 in; hang curtains wider than the window, from just under the ceiling to the floor. Ceiling pieces (pendants, fans) hang from the ceiling; a pendant's height is its drop, so its shade hangs about 30 to 36 in above a dining table. Moving a piece carries what rests on it, and removing it removes them. Give a piece an id when you place it to put other things on it in the same call. Set north from the plan's north arrow so the sun comes in the right windows.
 
 Units are shared publicly by link: never put a street address, building name or unit number in any name.`;
 
@@ -101,6 +105,7 @@ const settingsShape = {
   window_head: z.number().min(6).max(240).optional().describe('Height of the tops of windows, inches (default 80, often level with the doors).'),
   exterior_wall: z.number().min(2).max(30).optional().describe('Thickness of the outside walls drawn around the unit, inches (default 8).'),
   floor_level: z.number().int().min(1).max(80).optional().describe('Which floor of the building the unit is on (1 = ground floor); sets the view out of the windows.'),
+  north: z.number().min(-360).max(360).optional().describe('Which way true north points, as degrees clockwise from the top of the plan: 0 when the plan\'s top is north (the default), 90 when north is to the right (east on the plan), 270 when it is to the left. Read it off the plan\'s north arrow; it moves the sun.'),
   finishes: finishesShape.optional().describe('Finishes; only the ones you pass change.'),
 };
 
@@ -208,16 +213,27 @@ const labelFields = {
 const patchOf = (fields, what) => z.object(Object.fromEntries(Object.entries(fields).map(([k, v]) => [k, k === 'id' ? idOf(`Which ${what} to change; a new id adds one.`) : v.optional()])));
 
 const itemShape = {
-  at: XZ().describe('The center of the piece\'s footprint, [x, z] in inches.'),
-  rotation: z.number().optional().describe('Degrees clockwise on the plan; 0 = its front faces south, 90 west, 180 north, 270 east. A bed against a north wall is 0, headboard on the wall. Default 0.'),
+  at: XZ().describe('The center of the piece\'s footprint, [x, z] in inches. For a wall piece, a point at or near the wall it hangs on; for a piece resting on another (on), where on it (default: its middle).'),
+  rotation: z.number().optional().describe('Degrees clockwise on the plan; 0 = its front faces south, 90 west, 180 north, 270 east. A bed against a north wall is 0, headboard on the wall. Default 0. Wall pieces face away from their wall, whatever you pass.'),
   width: z.number().positive().max(360).optional().describe('Side to side as you face its front, inches. Default: the catalog or asset size.'),
   depth: z.number().positive().max(360).optional().describe('Back to front, inches (a bed\'s length).'),
   height: z.number().positive().max(108).optional().describe('Inches.'),
   color: z.string().optional().describe(`A swatch (${SWATCHES.filter((s) => s.key).map((s) => s.key).join(', ')}) or "#rrggbb". Omit for the piece's own finish.`),
   name: z.string().max(LIMITS.name).optional().describe('Label shown in the app, like "Grandma\'s armchair".'),
+  on: z.string().max(40).optional().describe('What it rests on or hangs from: "floor"; "wall" (hung against the wall nearest at, facing into the room); "ceiling"; or the id of a placed piece (a table, nightstand, dresser, desk, bookshelf, TV stand, wall shelf; holds_items in get_catalog) or of a fixture (a kitchen run\'s counter, an island, a bar counter, a vanity, a washer) to stand on. Default from its placement in get_catalog: surface pieces land on whatever is under at, else the floor; wall pieces on the nearest wall; ceiling pieces on the ceiling.'),
+  elevation: z.number().min(0).max(228).optional().describe('Inches from the floor to its underside. For a wall piece, how high it hangs (default in get_catalog). For a piece on a bookshelf, picks the shelf nearest this height. Floor, ceiling and other resting pieces get theirs from what holds them.'),
 };
 
 const LISTS = { rooms: 'room', walls: 'wall', openings: 'opening', fixtures: 'fixture' };
+
+// What E or a tap does to a piece in the app (catalog act).
+const USE = { light: 'switches on and off', screen: 'turns on and off', curtain: 'opens and closes', fan: 'spins', door: 'its door opens' };
+const PLACEMENT_ABOUT = {
+  floor: 'Stands on the floor.',
+  surface: 'Rests on a placed piece that holds items (holds_items) or a counter, island, vanity or washer; on the floor if nothing is under it.',
+  wall: 'Hangs with its back against a wall, facing into the room; elevation is the height of its underside.',
+  ceiling: 'Hangs from the ceiling; its height runs from the ceiling down to its bottom.',
+};
 
 // ---------------------------------------------------------------------------
 
@@ -230,10 +246,12 @@ export function createMcp(config, units, limiters) {
     const current = () => { const row = units.get(id); return { row, U: units.built(row) }; };
     const write = (change) => { limit(limiters.write, ip, 'changes'); return units.mutate(id, key, change); };
 
-    const itemOut = (U) => (it) => ({
+    const itemOut = (U, assets = []) => (it) => ({
       id: it.uid, type: it.type === 'asset' ? `asset:${it.asset}` : it.type, name: it.name,
       at: [inch(it.x), inch(it.z)], width: inch(it.w), depth: inch(it.d), height: inch(it.h), rotation: it.rot,
       color: it.color ?? undefined, room: U.roomAt(it.x, it.z)?.id ?? null,
+      on: it.on ? it.on.replace(/^[pf]:/, '') : 'floor', ...(it.y ? { elevation: inch(it.y) } : {}),
+      ...(placeOf(it, assets) !== 'floor' ? { placement: placeOf(it, assets) } : {}),
     });
     const pieceProblems = (U, { items, assets }, only = null) => items
       .filter((it) => !only || only.includes(it.uid))
@@ -263,6 +281,52 @@ export function createMcp(config, units, limiters) {
       item.x = Math.round(p.x * 1e4) / 1e4; item.z = Math.round(p.z * 1e4) / 1e4;
     }
 
+    // Where a piece goes (src/stacking.js): on the floor, a wall, the ceiling,
+    // or a piece or fixture, from on and elevation, else from its type's
+    // placement. `item` is whole (cleanItem); changed in place.
+    function resolvePlacement(item, spec, doc, U) {
+      const assets = doc.assets, items = doc.items;
+      const place = placeOf(item, assets);
+      const y = spec.elevation !== undefined ? ft(spec.elevation) : undefined;
+      const on = spec.on ?? { surface: 'auto', wall: 'wall', ceiling: 'ceiling' }[place] ?? 'floor';
+      const where = `${item.name} (${item.uid})`;
+      if (on === 'floor') { delete item.on; delete item.y; return; }
+      if (on === 'wall') {
+        const at = { ...item, y: y ?? item.y ?? (catalogByType[item.type]?.y ?? 48) / 12 };
+        const hung = hangOnWall(at, item.x, item.z, U, { y: at.y });
+        if (!hung) throw new AppError(400, `${where}: no wall within 3 ft of [${inch(item.x)}, ${inch(item.z)}] stands behind all of its ${inch(item.w)} in width at ${inch(at.y)} to ${inch(at.y + item.h)} in up (windows and doorways are gaps). Give at a point on a wall, or change elevation or width.`);
+        Object.assign(item, { x: hung.x, z: hung.z, rot: hung.rot, y: at.y, on: 'wall' });
+        return;
+      }
+      if (on === 'ceiling') { Object.assign(item, { on: 'ceiling', y: ceilingY(item, U) }); return; }
+      // Something set down new on a table or counter faces the way it does.
+      const face = (p) => { const { face: rot, ...rest } = p; return spec.rotation === undefined && rot !== undefined && !spec.keepRotation ? { ...rest, rot } : rest; };
+      if (on === 'auto') {
+        const p = face(placeByType(item, { items, U, assets }));
+        Object.assign(item, p);
+        if (!p.on) { delete item.on; delete item.y; }
+        return;
+      }
+      const piece = items.find((i) => i.uid === on);
+      const fixture = !piece && U.fixtures.find((f) => f.id === on);
+      if (!piece && !fixture) throw new AppError(400, `${where}: on "${on}" isn't a piece or a fixture in this unit. Use "floor", "wall", "ceiling", a piece's id (get_unit furniture) or a fixture's id.`);
+      if (piece && (piece.uid === item.uid || descendants(item.uid, items).includes(piece))) throw new AppError(400, `${where} can't rest on itself or on something resting on it.`);
+      const r = restOn(item, piece ? { kind: 'piece', piece } : { kind: 'fixture', fixture }, { x: spec.at ? item.x : NaN, z: spec.at ? item.z : NaN, y: y ?? null, U, assets });
+      if (typeof r === 'string') throw new AppError(400, `${where}: ${r} get_catalog says which pieces hold items (holds_items).`);
+      Object.assign(item, face(r));
+    }
+
+    // A piece moved, turned, resized or raised: what rests on it follows.
+    function carryChildren(before, item, doc, carried) {
+      if (!descendants(item.uid, doc.items).length) return;
+      if (['x', 'z', 'rot', 'w', 'd', 'h', 'y'].every((k) => (before[k] ?? 0) === (item[k] ?? 0))) return;
+      for (const m of carry(before, item, doc.items, doc.assets)) {
+        const child = doc.items.find((i) => i.uid === m.uid);
+        Object.assign(child, m);
+        carried.add(child.uid);
+      }
+    }
+
     function unitOut(row, U) {
       const spec = row.doc.unit, items = row.doc.items;
       const builtOpening = Object.fromEntries(U.openings.map((o) => [o.id, o]));
@@ -282,7 +346,7 @@ export function createMcp(config, units, limiters) {
           ...toInches.fixture(f), room: f.room, against_wall: Object.keys(f.against).filter((k) => f.against[k]),
         })),
         labels: spec.labels.map(toInches.label),
-        furniture: items.map(itemOut(U)),
+        furniture: items.map(itemOut(U, row.doc.assets)),
         assets: row.doc.assets.map(assetOut),
         problems: [...U.problems, ...pieceProblems(U, row.doc)],
       };
@@ -299,7 +363,7 @@ export function createMcp(config, units, limiters) {
       }
       return out;
     }
-    const assetOut = (a) => ({ asset_id: a.id, name: a.name, description: a.description, width: a.w, depth: a.d, height: a.h, parts: a.parts.length, place_as: `asset:${a.id}` });
+    const assetOut = (a) => ({ asset_id: a.id, name: a.name, description: a.description, placement: a.place ?? 'floor', kind: a.kind ?? 'furniture', width: a.w, depth: a.d, height: a.h, parts: a.parts.length, ...(a.light ? { light_at: a.light } : {}), place_as: `asset:${a.id}` });
 
     // build_unit and edit_unit: settings, list changes, wall fixtures slid
     // flush, then one save. Returns what to tell the agent.
@@ -456,7 +520,12 @@ Returns the same report as build_unit. Check the result with render_plan.`,
       room_kinds: ROOM_KINDS,
       floors: FLOORS,
       finishes: FINISH_OPTIONS,
-      furniture: CATALOG.map((c) => ({ type: c.type, name: c.name, group: c.group, width: c.w, depth: c.d, height: c.h, flat: c.build === 'rug' })),
+      furniture: CATALOG.map((c) => ({
+        type: c.type, name: c.name, kind: c.kind, placement: c.place, group: c.group, width: c.w, depth: c.d, height: c.h,
+        ...(c.place === 'wall' ? { elevation: c.y } : {}), ...(holdsItems(c.type) ? { holds_items: true } : {}),
+        ...(c.act ? { use: USE[c.act] } : {}), ...(c.build === 'rug' ? { flat: true } : {}),
+      })),
+      placements: PLACEMENT_ABOUT,
       furniture_colors: SWATCHES.filter((s) => s.key).map((s) => s.key),
       custom_furniture: 'For anything else, build it with create_asset and place it as type "asset:<asset_id>".',
     })));
@@ -480,30 +549,38 @@ Returns the same report as build_unit. Check the result with render_plan.`,
 
     server.registerTool('place_items', {
       title: 'Place furniture',
-      description: 'Add pieces. Each needs a type (from get_catalog furniture, or "asset:<asset_id>" for a piece made with create_asset) and a center at [x, z] in inches; size defaults to the catalog or asset size. A piece set slightly into a wall or its trim (baseboards stand about ½ in proud of the wall, door casings ¾ in, window stools 1¼ in) is eased out up to 3 in; eased_off_walls lists those. Returns the new pieces with their ids and any problems: running into walls or fixtures, overlapping other pieces, blocking a door.',
+      description: 'Add pieces. Each needs a type (from get_catalog furniture, or "asset:<asset_id>" for a piece made with create_asset) and a center at [x, z] in inches (or, for a piece resting on another, just on); size defaults to the catalog or asset size. Where it goes follows its placement in get_catalog unless you pass on: floor pieces stand on the floor, surface pieces rest on the piece or counter under at, wall pieces hang on the nearest wall at elevation, ceiling pieces hang from the ceiling. Pieces are placed in order, so a piece given an id can hold the ones after it. A floor piece set slightly into a wall or its trim (baseboards stand about ½ in proud of the wall, door casings ¾ in, window stools 1¼ in) is eased out up to 3 in; eased_off_walls lists those. Returns the new pieces with their ids, what they rest on and their elevation, and any problems: running into walls or fixtures, overlapping other pieces, blocking a door, hanging off a table\'s edge, not against a wall.',
       inputSchema: {
-        items: z.array(z.object({ type: z.string().describe('Catalog type, or "asset:<asset_id>".'), ...itemShape })).min(1).max(60).describe('Pieces to add.'),
+        items: z.array(z.object({
+          type: z.string().describe('Catalog type, or "asset:<asset_id>".'),
+          id: z.string().regex(/^[A-Za-z0-9_-]{4,24}$/, 'An id is 4 to 24 letters, digits, - or _.').optional().describe('An id you choose (4 to 24 letters, digits, - or _), so later pieces in this call can rest on it. Default: a random one.'),
+          ...itemShape, at: itemShape.at.optional(),
+        })).min(1).max(60).describe('Pieces to add, in order.'),
       },
     }, ({ items }) => run(() => {
       for (const spec of items) {
         if (!/^asset:/.test(spec.type) && !catalogByType[spec.type]) throw new AppError(400, `"${spec.type}" is not in the catalog. Call get_catalog, or build it with create_asset.`);
+        if (!spec.at && (!spec.on || ['floor', 'wall', 'ceiling'].includes(spec.on))) throw new AppError(400, `A ${spec.type} needs at, unless on names the piece or fixture it rests on.`);
       }
       const { U: U0 } = current();
       const eased = [];
       const { row, result } = write((doc) => items.map((spec) => {
-        const item = toItem(spec, { uid: randomId(8) });
-        if (item.type === 'asset' && !doc.assets.some((a) => a.id === item.asset)) throw new AppError(400, `There is no asset "${item.asset}" in this unit. create_asset returns the id to use.`);
-        settle(U0, doc, item, eased);
+        const raw = toItem(spec, { uid: spec.id ?? randomId(8) });
+        if (doc.items.some((i) => i.uid === raw.uid)) throw new AppError(400, `There is already a piece with the id "${raw.uid}". Choose another id, or leave it out.`);
+        if (raw.type === 'asset' && !doc.assets.some((a) => a.id === raw.asset)) throw new AppError(400, `There is no asset "${raw.asset}" in this unit. create_asset returns the id to use.`);
+        const item = cleanItem(raw, Object.fromEntries(doc.assets.map((a) => [a.id, a])));
+        resolvePlacement(item, spec, doc, U0);
+        if (onFloor(item)) settle(U0, doc, item, eased);
         doc.items.push(item);
         return item.uid;
       }));
       const U = units.built(row);
-      return ok({ placed: row.doc.items.filter((i) => result.includes(i.uid)).map(itemOut(U)), ...(eased.length ? { eased_off_walls: eased } : {}), problems: pieceProblems(U, row.doc, result), view_url: viewUrl });
+      return ok({ placed: row.doc.items.filter((i) => result.includes(i.uid)).map(itemOut(U, row.doc.assets)), ...(eased.length ? { eased_off_walls: eased } : {}), problems: pieceProblems(U, row.doc, result), view_url: viewUrl });
     }));
 
     server.registerTool('update_items', {
       title: 'Move or change furniture',
-      description: 'Change placed pieces by id: move (at), turn (rotation), resize, recolor, rename or change type. Only the fields you pass change. Returns the pieces and any problems.',
+      description: 'Change placed pieces by id: move (at), turn (rotation), resize, recolor, rename, change type, or put it on something else (on, elevation). Only the fields you pass change. A surface piece moved with at lands on whatever is under its new spot; a wall piece re-hangs on the wall nearest it. Whatever rests on a piece you move, turn, resize or raise moves with it (carried lists them). Returns the pieces and any problems.',
       inputSchema: {
         items: z.array(z.object({
           id: z.string().describe('The piece\'s id, from get_unit or place_items.'),
@@ -514,22 +591,43 @@ Returns the same report as build_unit. Check the result with render_plan.`,
     }, ({ items }) => run(() => {
       const { U: U0 } = current();
       const eased = [];
+      const carried = new Set();
       const { row } = write((doc) => {
+        const assets = Object.fromEntries(doc.assets.map((a) => [a.id, a]));
         for (const spec of items) {
           const i = doc.items.findIndex((it) => it.uid === spec.id);
           if (i < 0) throw new AppError(400, `There is no piece "${spec.id}" in this unit. get_unit lists them.`);
-          doc.items[i] = toItem(spec, doc.items[i]);
-          settle(U0, doc, doc.items[i], eased);
+          const before = cleanItem(doc.items[i], assets);
+          const item = cleanItem(toItem(spec, doc.items[i]), assets);
+          if (!item) throw new AppError(400, `"${spec.type}" is not in the catalog or its asset is missing.`);
+          // Off the floor, anything that changes where or how big it is
+          // puts it back on (or against) what holds it.
+          const moved = ['at', 'width', 'depth', 'height', 'rotation', 'type'].some((k) => spec[k] !== undefined);
+          if (spec.on !== undefined || spec.elevation !== undefined || (moved && !onFloor(before))) {
+            // Unless told otherwise it stays on what holds it, at its height
+            // (the same shelf); a surface piece moved elsewhere lands on what's there.
+            const current = before.on ? before.on.replace(/^[pf]:/, '') : 'floor';
+            const on = spec.on ?? (spec.at && placeOf(item, doc.assets) === 'surface' ? undefined : current);
+            const keep = spec.on === undefined && before.y ? inch(before.y) : undefined;
+            resolvePlacement(item, { ...spec, on, at: spec.at ?? [inch(item.x), inch(item.z)], elevation: spec.elevation ?? keep, keepRotation: true }, doc, U0);
+          }
+          if (onFloor(item)) settle(U0, doc, item, eased);
+          doc.items[i] = item;
+          carryChildren(before, item, doc, carried);
         }
       });
       const U = units.built(row);
       const ids = items.map((s) => s.id);
-      return ok({ updated: row.doc.items.filter((i) => ids.includes(i.uid)).map(itemOut(U)), ...(eased.length ? { eased_off_walls: eased } : {}), problems: pieceProblems(U, row.doc, ids) });
+      return ok({
+        updated: row.doc.items.filter((i) => ids.includes(i.uid)).map(itemOut(U, row.doc.assets)),
+        ...(carried.size ? { carried: row.doc.items.filter((i) => carried.has(i.uid) && !ids.includes(i.uid)).map(itemOut(U, row.doc.assets)) } : {}),
+        ...(eased.length ? { eased_off_walls: eased } : {}), problems: pieceProblems(U, row.doc, [...ids, ...carried]),
+      });
     }));
 
     server.registerTool('remove_items', {
       title: 'Remove furniture',
-      description: 'Remove pieces by id, or every piece with all: true. Fixtures (kitchen, bath…) are part of the unit: remove those with edit_unit.',
+      description: 'Remove pieces by id, or every piece with all: true. What rests on a removed piece goes with it (also_removed lists those). Fixtures (kitchen, bath…) are part of the unit: remove those with edit_unit.',
       inputSchema: {
         ids: z.array(z.string()).optional().describe('Ids of pieces to remove.'),
         all: z.boolean().optional().describe('Remove every piece of furniture.'),
@@ -537,33 +635,39 @@ Returns the same report as build_unit. Check the result with render_plan.`,
       annotations: { destructiveHint: true },
     }, ({ ids = [], all = false }) => run(() => {
       const { row, result } = write((doc) => {
+        const gone = new Set(all ? doc.items.map((it) => it.uid) : ids);
+        const also = all ? [] : ids.flatMap((id) => descendants(id, doc.items)).filter((it) => !gone.has(it.uid));
+        for (const it of also) gone.add(it.uid);
         const before = doc.items.length;
-        doc.items = all ? [] : doc.items.filter((it) => !ids.includes(it.uid));
-        return before - doc.items.length;
+        doc.items = doc.items.filter((it) => !gone.has(it.uid));
+        return { removed: before - doc.items.length, also: [...new Map(also.map((it) => [it.uid, { id: it.uid, name: it.name }])).values()] };
       });
-      return ok({ removed: result, remaining: row.doc.items.length });
+      return ok({ removed: result.removed, ...(result.also.length ? { also_removed: result.also } : {}), remaining: row.doc.items.length });
     }));
 
     server.registerTool('create_asset', {
       title: 'Build a custom piece',
       description: `Make a 3D piece out of primitives when the catalog has nothing like it (a specific chair, a piano, a cat tree…), then place it with place_items as type "asset:<asset_id>".
 
-Parts are in inches in the piece's own frame: +x to the piece's right as you face its front, +y up, +z toward its front. The piece is re-centered so its footprint is centered and its lowest point is on the floor, so only the parts' positions relative to each other matter. Real proportions matter more than detail: a dining chair is about 18 wide, 20 deep, 34 tall with its seat at 18. Pass asset_id to replace a piece you made earlier; placed copies update too.`,
+Parts are in inches in the piece's own frame: +x to the piece's right as you face its front, +y up, +z toward its front (a wall piece's back, -z, goes against the wall). The piece is re-centered so its footprint is centered and its lowest point is on the floor, so only the parts' positions relative to each other matter. Real proportions matter more than detail: a dining chair is about 18 wide, 20 deep, 34 tall with its seat at 18. Say where it goes with placement (a lamp for a table is surface, a clock is wall) and what it is with kind. A lamp gets light_at (where its bulb is) and its shade or bulb parts finish "glow": then it switches on and off and lights the room. Pass asset_id to replace a piece you made earlier; placed copies update too.`,
       inputSchema: {
         name: z.string().max(LIMITS.name).describe('Like "Bar stool" or "Upright piano".'),
         description: z.string().max(LIMITS.description).optional().describe('What it is, in a sentence.'),
         asset_id: z.string().optional().describe('Replace this existing asset instead of making a new one.'),
+        placement: z.enum(PLACES).optional().describe('Where it goes: floor (default), surface (on tables, counters, shelves), wall (hangs on a wall) or ceiling (hangs from the ceiling).'),
+        kind: z.enum(KINDS.map((k) => k.key)).optional().describe('What it is, for the catalog (default furniture).'),
+        light_at: z.array(z.number()).length(3).optional().describe('A lamp: [x, y, z] inches of its bulb, in the same frame as the parts.'),
         parts: z.array(z.object({
           shape: z.enum(SHAPES).describe('box, cylinder, cone (its tip points up) or sphere.'),
           size: z.array(z.number()).length(3).describe('[x, y, z] inches: a box\'s width, height and depth; a cylinder\'s or cone\'s diameter, height and depth-diameter; a sphere\'s three diameters.'),
           at: z.array(z.number()).length(3).describe('[x, y, z] of its center, inches.'),
           rot: z.array(z.number()).length(3).optional().describe('[x, y, z] degrees, applied in x, y, z order; [90, 0, 0] lays a cylinder along z.'),
           color: z.string().optional().describe('"#rrggbb".'),
-          finish: z.enum(FINISHES).optional().describe(`${FINISHES.join(', ')}.`),
+          finish: z.enum(FINISHES).optional().describe(`${FINISHES.join(', ')}. glow: a lamp's shade or bulb, lit while it's on.`),
         })).min(1).max(LIMITS.parts).describe(`Up to ${LIMITS.parts} parts.`),
       },
-    }, ({ name, description, asset_id, parts }) => run(() => {
-      const asset = cleanAsset({ id: asset_id, name, description, parts });
+    }, ({ name, description, asset_id, placement, kind, light_at, parts }) => run(() => {
+      const asset = cleanAsset({ id: asset_id, name, description, place: placement, kind, light: light_at, parts });
       if (!asset) throw new AppError(400, 'None of those parts could be used.');
       write((doc) => {
         const others = doc.assets.filter((a) => a.id !== asset.id);
@@ -598,7 +702,7 @@ Parts are in inches in the piece's own frame: +x to the piece's right as you fac
 
     server.registerTool('check_unit', {
       title: 'Check the unit',
-      description: 'The unit\'s problems (rooms, walls, doors, windows, fixtures), and for every piece of furniture: its room, the clear floor on each side up to the nearest wall, fixture or other piece (inches), and its problems. Use it to judge walkways (aim for 30 to 36 in) and to confirm nothing blocks a door.',
+      description: 'The unit\'s problems (rooms, walls, doors, windows, fixtures), and for every piece of furniture: its room, what it rests on and how high, the clear floor on each side up to the nearest wall, fixture or other piece (inches; pieces on the floor only), and its problems. Use it to judge walkways (aim for 30 to 36 in) and to confirm nothing blocks a door.',
       inputSchema: {},
       annotations: { readOnlyHint: true },
     }, () => run(() => {
@@ -606,7 +710,8 @@ Parts are in inches in the piece's own frame: +x to the piece's right as you fac
       const items = row.doc.items;
       const pieces = items.map((it) => ({
         id: it.uid, name: it.name, room: U.roomAt(it.x, it.z)?.id ?? null,
-        clear_floor: isFlat(it) ? null : Object.fromEntries(clearances(it, items, U.obstacles).map((c) => [c.side, inch(c.dist)])),
+        on: it.on ? it.on.replace(/^[pf]:/, '') : 'floor', ...(it.y ? { elevation: inch(it.y) } : {}),
+        clear_floor: isFlat(it) || !onFloor(it) ? null : Object.fromEntries(clearances(it, items, U.obstacles).map((c) => [c.side, inch(c.dist)])),
         problems: problems(it, items, U, row.doc.assets),
       }));
       return ok({ unit_problems: U.problems, pieces, pieces_with_problems: pieces.filter((p) => p.problems.length).length });

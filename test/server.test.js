@@ -349,3 +349,75 @@ test('MCP: editing part of a copy of the example keeps the rest', async () => {
   assert.deepEqual([Math.round(win.width * 12), win.mullions], [80, [0.577]]);
   assert.equal(unit.fixtures.length, 16);
 });
+
+test('MCP: an agent decorates: lamps on tables, art on walls, a pendant, the counter', async () => {
+  const u = await create();
+  const { call } = mcpAt(u.mcpUrl);
+  await call('build_unit', SMALL);
+  assert.equal((await call('edit_unit', { north: 90 })).isError, undefined);
+  assert.equal((await call('get_unit')).data.settings.north, 90);
+
+  const catalog = (await call('get_catalog')).data;
+  const kind = (t) => catalog.furniture.find((f) => f.type === t);
+  assert.deepEqual([kind('table-lamp').placement, kind('table-lamp').kind, kind('table-lamp').use], ['surface', 'lighting', 'switches on and off']);
+  assert.deepEqual([kind('wall-art').placement, kind('wall-art').elevation], ['wall', 45]);
+  assert.equal(kind('pendant').placement, 'ceiling');
+  assert.equal(kind('sidetable').holds_items, true);
+  assert.equal(kind('sofa').holds_items, undefined);
+  assert.ok(catalog.placements.wall);
+
+  const placed = (await call('place_items', { items: [
+    { type: 'sidetable', id: 'side-1', at: [120, 150] },
+    { type: 'table-lamp', on: 'side-1' },
+    { type: 'dresser', id: 'dresser', at: [143, 100], rotation: 90 },
+    { type: 'books', at: [143, 110] },
+    { type: 'wall-art', at: [148, 130] },
+    { type: 'curtains', at: [80, 12], width: 76 },
+    { type: 'pendant', at: [80, 100] },
+    { type: 'coffee-maker', on: 'kitchen' },
+  ] })).data;
+  const by = Object.fromEntries(placed.placed.map((p) => [p.type, p]));
+  assert.deepEqual([by['table-lamp'].on, by['table-lamp'].elevation, by['table-lamp'].at], ['side-1', 24, [120, 150]]);
+  assert.deepEqual([by.books.on, by.books.elevation], ['dresser', 32]);
+  assert.deepEqual([by['wall-art'].on, by['wall-art'].elevation, by['wall-art'].rotation, by['wall-art'].at], ['wall', 45, 90, [151.25, 130]]);
+  assert.deepEqual([by.curtains.on, by.curtains.rotation, by.curtains.at[1]], ['wall', 0, 11]);
+  assert.deepEqual([by.pendant.on, by.pendant.elevation], ['ceiling', 72]);
+  assert.deepEqual([by['coffee-maker'].on, by['coffee-maker'].elevation], ['kitchen', 36]);
+  assert.deepEqual(placed.problems, []);
+
+  // Moving the side table carries the lamp; the art goes up the wall.
+  const moved = (await call('update_items', { items: [{ id: 'side-1', at: [120, 130] }, { id: by['wall-art'].id, elevation: 50 }] })).data;
+  assert.deepEqual(moved.carried.map((p) => [p.type, p.at]), [['table-lamp', [120, 130]]]);
+  assert.equal(moved.updated.find((p) => p.type === 'wall-art').elevation, 50);
+  assert.deepEqual(moved.problems, []);
+  // The lamp moved off its table lands on the floor, and says it's on the floor.
+  const off = (await call('update_items', { items: [{ id: by['table-lamp'].id, at: [60, 120] }] })).data.updated[0];
+  assert.deepEqual([off.on, off.elevation], ['floor', undefined]);
+  assert.equal((await call('update_items', { items: [{ id: by['table-lamp'].id, on: 'side-1' }] })).data.updated[0].elevation, 24);
+
+  // What can't be done says why.
+  assert.match((await call('place_items', { items: [{ type: 'mirror', at: [80, 100] }] })).text, /no wall within 3 ft/);
+  assert.match((await call('place_items', { items: [{ type: 'vase', on: 'nothing1' }] })).text, /isn't a piece or a fixture/);
+  assert.match((await call('place_items', { items: [{ type: 'vase', id: 'side-1', at: [1, 1] }] })).text, /already a piece/);
+  assert.match((await call('place_items', { items: [{ type: 'vase', on: 'wall' }] })).text, /needs at/);
+
+  const check = (await call('check_unit')).data;
+  assert.equal(check.pieces.find((p) => p.id === by.pendant.id).on, 'ceiling');
+  assert.equal(check.pieces.find((p) => p.id === by.books.id).clear_floor, null);
+  assert.ok(check.pieces.find((p) => p.id === 'dresser').clear_floor);
+  const pic = await call('render_plan');
+  assert.ok(isPng(Buffer.from(pic.content[0].data, 'base64')));
+
+  // Removing the table takes the lamp with it.
+  const removed = (await call('remove_items', { ids: ['side-1'] })).data;
+  assert.deepEqual([removed.removed, removed.also_removed.map((p) => p.id)], [2, [by['table-lamp'].id]]);
+
+  // A lamp an agent makes switches on: placement, kind, light and glow are kept.
+  const lamp = (await call('create_asset', { name: 'Mushroom lamp', placement: 'surface', kind: 'lighting', light_at: [0, 10, 0], parts: [
+    { shape: 'cylinder', size: [6, 1, 6], at: [0, 0.5, 0], color: '#222222', finish: 'metal' },
+    { shape: 'sphere', size: [10, 8, 10], at: [0, 10, 0], color: '#f4ead8', finish: 'glow' },
+  ] })).data;
+  assert.deepEqual([lamp.placement, lamp.kind, lamp.light_at], ['surface', 'lighting', [0, 10, 0]]);
+  const onDresser = (await call('place_items', { items: [{ type: lamp.place_as, at: [143, 85] }] })).data.placed[0];
+  assert.deepEqual([onDresser.on, onDresser.elevation], ['dresser', 32]);
+});
