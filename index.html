@@ -544,6 +544,79 @@ h1 a:hover { color: var(--oak); }
 .toast:not(:has(button)) { padding-right: 16px; }
 .toast button { appearance: none; border: 0; background: none; color: var(--oak); font-weight: 700; cursor: pointer; padding: 2px 6px; }
 
+/* ---------- Suggestions (src/suggestions.js) ---------- */
+.tab .badge {
+  display: inline-grid; place-items: center; min-width: 17px; height: 17px; padding: 0 5px; margin-left: 5px; border-radius: 999px;
+  background: var(--oak); color: var(--surface); font: 600 10.5px/1 var(--font-mono); vertical-align: 1px;
+}
+/* While one is previewed, the rest of the Furnish tab steps aside. */
+#tab-furniture.previewing > .group:not(#suggestGroup) { display: none; }
+.sg-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.sg-row {
+  appearance: none; width: 100%; cursor: pointer; text-align: left; border: 1px solid var(--rule); border-radius: 10px;
+  background: var(--surface); padding: 10px 12px; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 5px 12px; align-items: baseline;
+}
+.sg-row:hover { background: var(--surface-2); border-color: var(--ink-2); }
+.sg-top { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.sg-top b { font-size: 14px; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sg-top small, .sg-head small { font: 400 11.5px/1 var(--font-mono); color: var(--ink-2); white-space: nowrap; }
+.sg-count { font: 500 11.5px/1 var(--font-mono); color: var(--oak); white-space: nowrap; }
+.sg-row .sg-note { grid-column: 1 / -1; font-size: 13px; color: var(--ink-2); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.sg-row[aria-current="true"] { border-color: var(--oak); box-shadow: inset 3px 0 0 var(--oak); }
+/* The others, to swap to, above the one previewed. */
+.sg-list.compact { gap: 4px; margin-bottom: 16px; }
+.sg-list.compact .sg-row { padding: 8px 12px; }
+.sg-list.compact .sg-note { display: none; }
+.sg-back {
+  appearance: none; border: 0; background: none; cursor: pointer; display: inline-flex; align-items: center; gap: 3px;
+  padding: 5px 9px 5px 3px; margin: -4px 0 6px -3px; border-radius: 6px; font-weight: 600; font-size: 13px; color: var(--ink-2);
+}
+.sg-back:hover { color: var(--ink); background: var(--surface-2); }
+.sg-back svg { width: 15px; height: 15px; }
+.sg-head { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.sg-head b { font-size: 17px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sg-quote { margin: 6px 0 0; font-size: 14px; border-left: 2px solid var(--oak); padding: 1px 0 1px 10px; overflow-wrap: anywhere; }
+#sgSummary { margin: 10px 0; }
+.sg-changes { list-style: none; margin: 0 0 14px; padding: 0; display: grid; gap: 4px; }
+.sg-change { display: grid; grid-template-columns: 42px minmax(0, 1fr); background: var(--surface-2); border-radius: 8px; }
+.sg-change.clash { box-shadow: inset 3px 0 0 var(--warn); }
+.sg-box { display: grid; place-items: center; cursor: pointer; }
+.sg-box input {
+  appearance: none; margin: 0; width: 20px; height: 20px; border-radius: 5px; border: 1.5px solid var(--ink-2);
+  background: var(--surface); cursor: pointer; display: grid; place-items: center;
+}
+.sg-box input:checked { background: var(--chip); border-color: var(--chip); }
+.sg-box input:checked::after { content: ""; width: 10px; height: 5px; border: solid var(--on-chip); border-width: 0 0 2px 2px; transform: translateY(-1px) rotate(-45deg); }
+.sg-what { appearance: none; border: 0; background: none; cursor: pointer; text-align: left; padding: 10px 12px 10px 0; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.sg-what span { font-size: 13.5px; font-weight: 600; overflow-wrap: anywhere; }
+.sg-what small { font-size: 12.5px; line-height: 1.35; color: var(--warn); }
+.sg-what:hover span { text-decoration: underline; text-decoration-color: var(--rule); text-underline-offset: 3px; }
+#sgApply:disabled { cursor: default; }
+.field textarea {
+  font: 400 14px/1.4 var(--font-ui); color: var(--ink); background: var(--surface-2); border: 1px solid var(--rule);
+  border-radius: 6px; padding: 9px; width: 100%; min-width: 0; resize: vertical; min-height: 62px;
+}
+#offerGroup .field + .field { margin-top: 10px; }
+#offerGroup .btn-row { margin-top: 12px; }
+#offerSend:disabled { cursor: default; }
+/* On the stage while previewing, like the tape bar; above it when it's there too. */
+.suggest-bar {
+  position: absolute; left: 50%; transform: translateX(-50%); bottom: 18px; z-index: 4;
+  display: flex; align-items: center; gap: 8px; max-width: calc(100% - 24px);
+  background: var(--surface); border-radius: 12px; padding: 7px 7px 7px 14px; box-shadow: var(--shadow);
+}
+/* A set width, so flipping Before and After doesn't move the buttons. */
+.sb-meta { min-width: 0; width: 158px; flex: 0 1 auto; display: flex; flex-direction: column; gap: 3px; margin-right: 4px; }
+.sb-meta b { font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sb-meta small { font: 400 11.5px/1 var(--font-mono); color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.segmented.sb-sides { grid-template-columns: repeat(2, minmax(0, 1fr)); flex: none; padding: 2px; border-radius: 9px; }
+.sb-sides button { padding: 7px 11px; }
+.sb-sides button[aria-checked="true"] { background: var(--chip); color: var(--on-chip); }
+.suggest-bar .btn { padding: 7px 12px; flex: none; }
+.tape-bar:not([hidden]) ~ .suggest-bar { bottom: 78px; }
+.tape-bar:not([hidden]) ~ .suggest-bar:not([hidden]) ~ .toast { bottom: 144px; }
+.stage.previewing .hint { display: none; }
+
 /* ---------- Short screens held sideways (phones in landscape): a slim side panel ---------- */
 @media (orientation: landscape) and (max-height: 559px) {
   .app { grid-template-columns: min(320px, 38vw) 1fr; }
@@ -569,7 +642,9 @@ h1 a:hover { color: var(--oak); }
   .joystick { width: 96px; height: 96px; bottom: 14px; left: 14px; }
   .hint { bottom: auto; top: calc(max(10px, var(--safe-t)) + 48px); }
   .stage.visitor .hint { display: none; }
-  .piece-bar, .tape-bar { bottom: 12px; }
+  .piece-bar, .tape-bar, .suggest-bar { bottom: 12px; }
+  .tape-bar:not([hidden]) ~ .suggest-bar { bottom: 68px; }
+  .stage.previewing .joystick, .stage.previewing .minimap, .stage.previewing .scalebar { bottom: 70px; }
   .stage.piece-active .minimap, .stage.measuring .minimap, .stage.piece-active .scalebar, .stage.measuring .scalebar { display: none; }
   .stage.piece-active .joystick, .stage.measuring .joystick { display: none; }
   .stage-card { inset: calc(max(10px, var(--safe-t)) + 52px) 12px 12px; place-items: start center; }
@@ -646,6 +721,17 @@ h1 a:hover { color: var(--oak); }
   .keys-note { display: none; }
   .pb-rot { display: none; }
   .toast { bottom: calc(var(--sheet-peek) + var(--safe-b) + 76px); }
+  .suggest-bar { bottom: calc(var(--sheet-peek) + var(--safe-b) + 12px); width: calc(100% - 24px); gap: 6px; padding-left: 12px; }
+  .sb-meta { width: auto; flex: 1 1 auto; margin-right: 0; }
+  .sb-long { display: none; }
+  .sb-sides button { padding: 7px 9px; }
+  .suggest-bar .btn { padding: 7px 10px; }
+  .tape-bar:not([hidden]) ~ .suggest-bar { bottom: calc(var(--sheet-peek) + var(--safe-b) + 70px); }
+  .tape-bar:not([hidden]) ~ .suggest-bar:not([hidden]) ~ .toast { bottom: calc(var(--sheet-peek) + var(--safe-b) + 134px); }
+  .stage.previewing .joystick { bottom: calc(var(--sheet-peek) + var(--safe-b) + 84px); }
+  .tape-bar:not([hidden]) ~ .suggest-bar:not([hidden]) ~ .joystick { bottom: calc(var(--sheet-peek) + var(--safe-b) + 142px); }
+  /* 16px keeps iOS from zooming in on focus. */
+  #offerGroup .field input, .field textarea { font-size: 16px; }
   .stage-card { inset: calc(max(12px, var(--safe-t)) + 60px) 12px calc(var(--sheet-peek) + var(--safe-b) + 12px); place-items: start center; }
   .stage.home .toast { bottom: calc(min(60dvh, 520px) + 16px); }
   .card { padding: 20px 20px 18px; }
@@ -715,7 +801,7 @@ h1 a:hover { color: var(--oak); }
       </header>
       <nav class="tabs" role="tablist">
         <button class="tab" role="tab" id="t-rooms" aria-controls="tab-rooms" aria-selected="true">Rooms</button>
-        <button class="tab" role="tab" id="t-furniture" aria-controls="tab-furniture" aria-selected="false">Furnish <span class="count" id="furnitureCount"></span></button>
+        <button class="tab" role="tab" id="t-furniture" aria-controls="tab-furniture" aria-selected="false">Furnish <span class="count" id="furnitureCount"></span><span class="badge" id="suggestBadge" hidden></span></button>
         <button class="tab" role="tab" id="t-share" aria-controls="tab-share" aria-selected="false">Share</button>
         <button class="tab" role="tab" id="t-tools" aria-controls="tab-tools" aria-selected="false">Tools</button>
       </nav>
@@ -740,6 +826,35 @@ h1 a:hover { color: var(--oak); }
           <p class="section-note" id="roomsNote"></p>
         </section>
         <section id="tab-furniture" role="tabpanel" aria-labelledby="t-furniture" hidden>
+          <!-- Suggestions (src/suggestions.js): the ones waiting for this unit,
+               previewed one at a time; and a copy sending its layout back. -->
+          <div class="group suggest-group" id="suggestGroup" hidden>
+            <h2>Suggestions</h2>
+            <ul class="sg-list" id="sgList"></ul>
+            <div class="sg-detail" id="sgDetail" hidden>
+              <button class="sg-back" id="sgBack"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M10 3.5 5.5 8l4.5 4.5"/></svg><span>Back</span></button>
+              <div class="sg-head"><b id="sgWho"></b><small id="sgWhen"></small></div>
+              <p class="sg-quote" id="sgNote"></p>
+              <p class="section-note flush" id="sgSummary"></p>
+              <ul class="sg-changes" id="sgChanges"></ul>
+              <div class="btn-row">
+                <button class="btn primary" id="sgApply">Apply</button>
+                <button class="btn" id="sgDismiss">Dismiss</button>
+              </div>
+              <p class="status" id="sgStatus" role="status"></p>
+            </div>
+          </div>
+          <div class="group" id="offerGroup" hidden>
+            <h2>Suggest your changes</h2>
+            <p class="section-note flush" id="offerTo"></p>
+            <label class="field wide"><span>Your name</span><input id="offerName" type="text" maxlength="40" autocomplete="off" placeholder="So they know who it's from"></label>
+            <label class="field wide"><span>Note</span><textarea id="offerNote" maxlength="200" rows="2" placeholder="What you changed, and why (optional)"></textarea></label>
+            <div class="btn-row">
+              <button class="btn primary" id="offerSend">Send suggestion</button>
+              <button class="btn" id="offerWithdraw" hidden>Withdraw</button>
+            </div>
+            <p class="status" id="offerStatus" role="status"></p>
+          </div>
           <div class="group notice" id="viewNotice" hidden>
             <p id="viewNoticeText"></p>
             <button class="btn primary" data-go="fork">Make your own version</button>
@@ -950,6 +1065,16 @@ h1 a:hover { color: var(--oak); }
       <span id="tapeText"></span>
       <button class="btn" id="tapeClear">Clear</button>
       <button class="btn primary" id="tapeDone">Done</button>
+    </div>
+    <!-- Previewing a suggestion (src/suggestions.js). -->
+    <div class="suggest-bar" id="suggestBar" hidden>
+      <div class="sb-meta"><b id="sbWho"></b><small id="sbSub"></small></div>
+      <div class="segmented sb-sides" id="sbSides" role="radiogroup" aria-label="Show">
+        <button role="radio" data-side="before" aria-checked="false">Before</button>
+        <button role="radio" data-side="after" aria-checked="true">After</button>
+      </div>
+      <button class="btn" id="sbChanges">Changes</button>
+      <button class="btn primary" id="sbDone">Done</button>
     </div>
     <button class="icon-btn recenter" id="recenter" aria-label="Reset view">
       <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 9a6 6 0 1 0 2-4.5"/><path d="M3 2.5V6h3.5"/></svg>
