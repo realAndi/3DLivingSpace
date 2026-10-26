@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildUnit, cleanUnit } from '../src/unit.js';
 import { cleanAsset } from '../src/design.js';
-import { catalogByType } from '../src/catalog.js';
+import { catalogByType, isFlat } from '../src/catalog.js';
 import { blockersFor, slideTo, problems, collides, clearances, settleOffWalls, collisionShapes } from '../src/fit.js';
 import { localParts, pieceParts } from '../src/parts.js';
 
@@ -229,6 +229,34 @@ test('clearances run from the outline of a turned piece', () => {
   const c = { ...a, rot: 0 };
   const e2 = clearances(c, [c, b]).find((s) => s.side === 'east');
   assert.deepEqual([e2.dist, e2.edge, e2.at], [0.5, 11, 10.6]);
+});
+
+test('a rug made as a custom piece lies flat: walked over, and nothing stops at its edge', () => {
+  // As people make them with create_asset: a low-pile rug left as furniture,
+  // 0.38" thick, and a 2" shag made as a rug.
+  const lowPile = cleanAsset({ id: 'lowpile', name: 'Low-pile rug', parts: [{ shape: 'box', size: [60, 0.38, 36], at: [0, 0.19, 0] }] });
+  const shag = cleanAsset({ id: 'shag', name: 'Shag rug', kind: 'rug', parts: [{ shape: 'box', size: [60, 2, 36], at: [0, 1, 0] }] });
+  const assets = [lowPile, shag];
+  const rug = (a, x, z) => ({ uid: `${a.id}1`, type: 'asset', asset: a.id, name: a.name, w: a.w / 12, d: a.d / 12, h: a.h / 12, x, z, rot: 0 });
+  const low = rug(lowPile, 15, 9), deep = rug(shag, 15, 9);
+  assert.ok(isFlat(piece('rug-5x8', 0, 0)) && !isFlat(piece('coffeetable', 0, 0)));
+  assert.ok(isFlat(low), 'an inch or less on the floor is flat, whatever it was made as');
+  assert.ok(isFlat(deep, assets) && !isFlat(deep), 'a thicker one is flat by its kind');
+  assert.ok(!isFlat({ ...low, on: 'wall', y: 4 }), 'hung on a wall it is not');
+  // A coffee table beside a rug measures to the wall, not the rug's edge; a box there would stop it.
+  const table = piece('coffeetable', 15, 13);
+  const box = { ...low, uid: 'box1', type: 'box', h: 2 };
+  const north = (others) => clearances(table, [table, ...others], [], assets).find((c) => c.side === 'north')?.dist;
+  assert.equal(north([box]), 1.5);
+  assert.equal(north([low]), undefined);
+  assert.equal(north([deep]), undefined);
+  // A sofa slides onto the shag, and a mat may lie in the entry door's swing.
+  const sofa = piece('sofa', 15, 13.5);
+  drag(sofa, 15, 9, [sofa, deep], assets);
+  assert.ok(near(sofa.z, 9), `the sofa reached the rug's middle (${sofa.z})`);
+  const mat = { ...rug(lowPile, 20, 15), w: 3, d: 1.8 };
+  assert.deepEqual(problems(mat, [mat], U, assets), []);
+  assert.match(problems({ ...mat, type: 'box', h: 1 }, [], U).join(), /entry/, 'a box there blocks the door');
 });
 
 test('every catalog piece stays inside its footprint and height (a TV may rise above its stand)', () => {

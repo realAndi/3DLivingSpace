@@ -96,7 +96,7 @@ function planGroup(doc, U, [bx, by, bw, bh], { detail = false } = {}) {
   const assets = Object.fromEntries((doc.assets ?? []).map((a) => [a.id, a]));
   // Bottom up: rugs, pieces on the floor, what rests on them (lowest first),
   // what hangs on the walls, then what hangs from the ceiling.
-  const tier = (it) => (isFlat(it) ? 0 : !it.on ? 1 : it.on === 'wall' ? 3 : it.on === 'ceiling' ? 4 : 2);
+  const tier = (it) => (isFlat(it, assets) ? 0 : !it.on ? 1 : it.on === 'wall' ? 3 : it.on === 'ceiling' ? 4 : 2);
   const items = [...(doc.items ?? [])].sort((p, q) => tier(p) - tier(q) || (p.y ?? 0) - (q.y ?? 0));
 
   if (detail) {
@@ -197,7 +197,7 @@ function planGroup(doc, U, [bx, by, bw, bh], { detail = false } = {}) {
       out.push(`<polygon points="${pts(poly)}" fill="${fillFor(it, assets)}" fill-opacity="0.25" stroke="${C.ink}" stroke-opacity="0.6" stroke-width="${detail ? 1.3 : 1}" stroke-dasharray="${detail ? '5 4' : '4 3'}"/>`);
       continue;
     }
-    out.push(`<polygon points="${pts(poly)}" fill="${fillFor(it, assets)}" stroke="${C.ink}" stroke-opacity="0.55" stroke-width="${detail ? 1.3 : 1}" fill-opacity="${isFlat(it) ? 0.85 : 1}"/>`);
+    out.push(`<polygon points="${pts(poly)}" fill="${fillFor(it, assets)}" stroke="${C.ink}" stroke-opacity="0.55" stroke-width="${detail ? 1.3 : 1}" fill-opacity="${isFlat(it, assets) ? 0.85 : 1}"/>`);
     out.push(line(poly[2], poly[3], `stroke="${C.oak}" stroke-width="${detail ? 3 : 2.2}"`));
   }
   // On the detail plan swings go over the furniture, so a blocked door shows.
@@ -275,7 +275,7 @@ function planGroup(doc, U, [bx, by, bw, bh], { detail = false } = {}) {
       continue;
     }
     const wall = it.on === 'wall';
-    const ink = isFlat(it) || wall ? C.ink : inkOn(fillFor(it, assets));
+    const ink = isFlat(it, assets) || wall ? C.ink : inkOn(fillFor(it, assets));
     const h = wall ? halo : null, size = wall ? 10.5 : 12;
     out.push(text(cx, cz - 2, it.name, { size, bold: true, fill: ink, anchor: 'middle', halo: h }));
     out.push(text(cx, cz + size - 1, it.uid, { size: size - 1.5, mono: true, fill: ink, anchor: 'middle', halo: h }));

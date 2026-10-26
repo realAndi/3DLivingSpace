@@ -408,7 +408,7 @@ export function createTools({ current, write, built, viewUrl = null, png, before
     const pieces = items.map((it) => ({
       id: it.uid, name: it.name, room: U.roomAt(it.x, it.z)?.id ?? null,
       on: it.on ? it.on.replace(/^[pf]:/, '') : 'floor', ...(it.y ? { elevation: inch(it.y) } : {}),
-      clear_floor: isFlat(it) || !onFloor(it) ? null : Object.fromEntries(clearances(it, items, U.obstacles).map((c) => [c.side, inch(c.dist)])),
+      clear_floor: isFlat(it, row.doc.assets) || !onFloor(it) ? null : Object.fromEntries(clearances(it, items, U.obstacles, row.doc.assets).map((c) => [c.side, inch(c.dist)])),
       problems: problems(it, items, U, row.doc.assets),
     }));
     return { unit_problems: U.problems, pieces, pieces_with_problems: pieces.filter((p) => p.problems.length).length };

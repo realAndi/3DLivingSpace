@@ -99,9 +99,6 @@ export const SWATCHES = [
 ];
 export const swatchKeys = SWATCHES.map((s) => s.key).filter(Boolean);
 
-// Rugs lie flat and never block walking.
-export const isFlat = (item) => (catalogByType[item.type]?.build ?? item.type) === 'rug';
-
 // Where a placed piece goes, and what it is, from its catalog entry or custom
 // asset (`assets` by id or as a list).
 const assetFor = (item, assets) => (item.type !== 'asset' || !assets ? null
@@ -109,6 +106,14 @@ const assetFor = (item, assets) => (item.type !== 'asset' || !assets ? null
 export const placeOf = (item, assets = null) => (item.type === 'asset' ? assetFor(item, assets)?.place : catalogByType[item.type]?.place) ?? 'floor';
 export const kindOf = (item, assets = null) => (item.type === 'asset' ? assetFor(item, assets)?.kind : catalogByType[item.type]?.kind) ?? 'furniture';
 export const actOf = (item, assets = null) => (item.type === 'asset' ? (assetFor(item, assets)?.light ? 'light' : null) : catalogByType[item.type]?.act) ?? null;
+
+// Rugs lie flat: you walk over them, other pieces stand on them, and they don't
+// block doors. That's the catalog's rugs, a custom piece made as a rug, and
+// anything else on the floor an inch tall or less (a mat, a rug made as
+// furniture). Placed sizes are in feet.
+const FLAT_H = 1 / 12 + 1e-6;
+export const isFlat = (item, assets = null) => (catalogByType[item.type]?.build ?? item.type) === 'rug'
+  || (!item.on && !(item.y > 0.02) && (item.h <= FLAT_H || kindOf(item, assets) === 'rug'));
 
 const rad = (deg) => (deg * Math.PI) / 180;
 

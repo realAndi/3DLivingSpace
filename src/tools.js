@@ -270,7 +270,7 @@ Parts are in inches in the piece's own frame: +x to the piece's right as you fac
       description: z.string().max(LIMITS.description).optional().describe('What it is, in a sentence.'),
       asset_id: z.string().optional().describe('Replace this existing asset instead of making a new one.'),
       placement: z.enum(PLACES).optional().describe('Where it goes: floor (default), surface (on tables, counters, shelves), wall (hangs on a wall) or ceiling (hangs from the ceiling).'),
-      kind: z.enum(KINDS.map((k) => k.key)).optional().describe('What it is, for the catalog (default furniture).'),
+      kind: z.enum(KINDS.map((k) => k.key)).optional().describe('What it is, for the catalog (default furniture). A rug or mat is kind rug: it lies flat, so people walk over it and other pieces stand on it (so does any floor piece an inch tall or less).'),
       light_at: z.array(z.number()).length(3).optional().describe('A lamp: [x, y, z] inches of its bulb, in the same frame as the parts.'),
       parts: z.array(z.object({
         shape: z.enum(SHAPES).describe('box, cylinder, cone (its tip points up) or sphere.'),
