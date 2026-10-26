@@ -68,6 +68,14 @@ who can look around and make their own version.
   it, and that browser can edit it too. Case, spaces and dashes don't matter.
   The server keeps the edit key encrypted with the code and never the code
   itself; guesses are limited per address and per unit.
+- **Suggestions.** Rearranged your own version of someone's unit? *Send
+  suggestion* (Furnish) offers your layout back to them, with a note; sending
+  again updates it. Its owner sees it under Suggestions, previews one suggestion
+  at a time in any view (before and after, changes outlined, removed pieces as
+  ghosts), ticks the changes to take (a table and what's on it count as one,
+  and changes that clash with their own since are marked) and applies them,
+  with Undo. `src/changes.js` works out the changes against the layout the copy
+  started from, so the owner sees only what was changed.
 
 ## The MCP tools
 
@@ -160,6 +168,8 @@ fixes the origin used in links.
 | `PATCH api/units/:id` | `X-Edit-Key`: furniture, title and author (the unit itself changes over MCP) |
 | `POST api/units/:id/fork` | A copy you own |
 | `GET`, `PUT`, `DELETE api/units/:id/code` | `X-Edit-Key`: whether an edit code is set; set one (`{code}`); remove it |
+| `POST api/units/:copy/suggest`, `GET`/`DELETE api/units/:copy/suggestion` | `X-Edit-Key` of a copy: offer its layout to the unit it was copied from (`{note}`; one open per copy); its status; withdraw it |
+| `GET api/units/:id/suggestions`, `POST api/units/:id/suggestions/:sid/apply` (`{groups}`), `…/dismiss`, `…/undo` | `X-Edit-Key`: the suggestions waiting, with their layouts; take some or all of one; dismiss it; undo an apply |
 | `POST api/units/:id/unlock` | `{code}`: the unit with its key, as if you'd made it (8 tries per address per 15 minutes, 40 per unit per hour) |
 | `GET api/units/:id/card.png`, `plan.png`, `api/card.png` | Link preview, labeled plan |
 
@@ -171,6 +181,7 @@ fixes the origin used in links.
 | `src/unit.js` | The unit model: vocabulary, cleaning, inch conversion, and building walls, openings and fixtures from it |
 | `src/example.js` | The example unit, traced from the leasing plan |
 | `src/geometry.js`, `src/fit.js` | Plane geometry; overlap, clearance and free-spot checks |
+| `src/changes.js` | Suggestions: what a copy changed, what clashes with the original since, applying a choice |
 | `src/stacking.js` | What holds each piece up: tops and shelves, walls, the ceiling; carrying what rests on a piece |
 | `src/catalog.js`, `src/design.js` | Furniture catalog; the stored document and its checks |
 | `src/architecture.js`, `src/fixtures.js` | 3D walls, floors, ceilings, doors, windows, railings; kitchens, baths and other built-ins |
