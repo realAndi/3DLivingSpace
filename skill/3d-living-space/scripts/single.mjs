@@ -7,7 +7,7 @@
 // and the fonts still come from the network.
 import { readFileSync, readdirSync } from 'node:fs';
 import { join, posix } from 'node:path';
-import { moduleGraph, artifactPage } from './app.mjs';
+import { moduleGraph, artifactPage, pageTitle } from './app.mjs';
 
 const NAME = 'living-space/';  // the bare prefix the modules are mapped under
 const IMPORT = /((?:^|[;\s])(?:import|export)\s[^'"`;]*?from\s*)(['"])(\.{1,2}\/[^'"]+)\2|((?:^|[;\s])import\s*)(['"])(\.{1,2}\/[^'"]+)\5|(import\(\s*)(['"])(\.{1,2}\/[^'"]+)\8(\s*\))/gm;
@@ -22,8 +22,10 @@ function rewrite(code, rel) {
     : s2 ? `${b}${q2}${to(s2)}${q2}` : `${c}${q3}${to(s3)}${q3}${d}`));
 }
 
-export function singleFile(root, snapshot) {
-  const page = artifactPage(readFileSync(join(root, 'index.html'), 'utf8'));
+// root holds the site's index.html, src/ and assets/ (a checkout), or the
+// Artifact's files already assembled (a packaged skill's app/: pass its page).
+export function singleFile(root, snapshot, { page, title } = {}) {
+  page = page ? page.replace(/<title>[^<]*<\/title>/, () => pageTitle(title)) : artifactPage(readFileSync(join(root, 'index.html'), 'utf8'), { title });
   const base = JSON.parse(/<script type="importmap">([\s\S]*?)<\/script>/.exec(page)[1]);
   const imports = { ...base.imports };
   for (const rel of moduleGraph(root)) {

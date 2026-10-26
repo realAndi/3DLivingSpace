@@ -21,6 +21,7 @@ import { createHash } from 'node:crypto';
 import { ToolError } from '../../../src/agent.js';
 import { cleanDesign } from '../../../src/design.js';
 import { assembleApp, pageTitle } from './app.mjs';
+import { singleFile } from './single.mjs';
 import { writeAtomic, newDoc } from './workdir.mjs';
 
 export const RULES = [
@@ -121,6 +122,21 @@ export function bundle(work, { out = work.path('artifact'), snapshotOnly = false
     next: url
       ? `Call the Artifact tool with publish as it is; it updates ${url} in place. Then push, so its database matches.`
       : `Call the Artifact tool with publish as it is. Then link this work dir to the Artifact and fill its database: ${command(work, 'push --url <the URL the publish returns>')}, and make the ArtifactData calls it prints.`,
+  };
+}
+
+// The page and the unit as one HTML file, for where there's no Artifact tool:
+// the person downloads it and opens it in a browser.
+export function single(work, { out = work.path('living-space.html') } = {}) {
+  const doc = work.load();
+  const title = doc.title || doc.unit.name;
+  const html = isPackaged()
+    ? singleFile(PACKAGED_APP, snapshotOf(doc), { page: readFileSync(join(PACKAGED_APP, 'index.html'), 'utf8'), title })
+    : singleFile(REPO, snapshotOf(doc), { title });
+  writeAtomic(out, html);
+  return {
+    file: out, bytes: Buffer.byteLength(html),
+    next: 'Give the person this file to download and open in a browser (Chrome, Safari, Edge or Firefox). It needs the internet only for the 3D library and the fonts. Furniture they move is kept in that browser; it has no sharing.',
   };
 }
 

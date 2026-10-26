@@ -19,7 +19,7 @@ import { z } from 'zod';
 import { TOOLS } from '../../../src/tools.js';
 import { createTools, pretty, ToolError } from '../../../src/agent.js';
 import { WorkDir, newDoc, toolContext } from './workdir.mjs';
-import { bundle, pullReads, pullFrom, push, setUrl, isPackaged, PACKAGED_APP, REPO } from './artifact.mjs';
+import { bundle, single, pullReads, pullFrom, push, setUrl, isPackaged, PACKAGED_APP, REPO } from './artifact.mjs';
 
 // Node 18 has Web Crypto only as a module; src/design.js randomId wants it global.
 globalThis.crypto ??= webcrypto;
@@ -30,12 +30,12 @@ const MIN_NODE = 18;
 const COMMANDS = {
   new: { usage: 'new [--example] [--title <title>] [--force]', about: 'Start a work dir: an empty unit, or with --example the example apartment\'s rooms without furniture. Won\'t replace a unit already there without --force.', flags: ['example', 'title', 'force'] },
   help: { usage: 'help [<tool or command>] [--markdown]', about: 'The tools and commands; one tool\'s description and input as JSON Schema; with --markdown, every tool as a reference document.', flags: ['markdown'] },
-  bundle: { usage: 'bundle [--out <dir>] [--snapshot-only] [--url <artifact url>]', about: 'Write the Artifact\'s files (the app, and unit.json: a snapshot of the unit) to <dir> (default <work dir>/artifact) and print what to pass to the Artifact tool\'s publish. --snapshot-only: just unit.json, for an Artifact already published.', flags: ['out', 'snapshot-only', 'url'] },
+  bundle: { usage: 'bundle [--out <dir>] [--snapshot-only] [--url <artifact url>]  |  bundle --single [--out <file>]', about: 'Write the Artifact\'s files (the app, and unit.json: a snapshot of the unit) to <dir> (default <work dir>/artifact) and print what to pass to the Artifact tool\'s publish. --snapshot-only: just unit.json, for an Artifact already published. --single: the page with the unit inside, as one HTML file to download (default <work dir>/living-space.html), for where there is no Artifact tool.', flags: ['out', 'snapshot-only', 'url', 'single'] },
   pull: { usage: 'pull [--url <artifact url>]  |  pull --from <dir> [--versions <file>] < ArtifactData results', about: 'Without --from, print the ArtifactData reads to make. With --from, take the documents they saved into unit.json (the Artifact\'s version wins where both changed), and each one\'s version from the ArtifactData results on stdin (or --versions).', flags: ['from', 'versions', 'url'] },
   push: { usage: 'push [--url <artifact url>]', about: 'Write the documents that changed since the last pull (all of them the first time) to <work dir>/outbox and print the ArtifactData batch calls that save them. Remembers the Artifact\'s URL.', flags: ['url'] },
   doctor: { usage: 'doctor', about: 'Check Node, where the scripts run from, and that the plan renderer and its fonts load.', flags: [] },
 };
-const BOOLEAN = new Set(['example', 'force', 'markdown', 'snapshot-only']);
+const BOOLEAN = new Set(['example', 'force', 'markdown', 'snapshot-only', 'single']);
 const TOOL_FLAGS = { render_plan: ['out'] };
 
 class Usage extends ToolError {}
@@ -230,7 +230,8 @@ export async function run(argv, io = {}) {
     const out = tool ? await runTool(tool, positional, flags, work, io)
       : name === 'new' ? cmdNew(flags, work)
       : name === 'help' ? (flags.markdown ? toolsMarkdown() : positional[1] ? helpOne(positional[1]) : helpList())
-      : name === 'bundle' ? pretty(bundle(work, { out: flags.out && resolve(io.cwd, flags.out), snapshotOnly: !!flags['snapshot-only'] }))
+      : name === 'bundle' ? pretty(flags.single ? single(work, { out: flags.out && resolve(io.cwd, flags.out) })
+        : bundle(work, { out: flags.out && resolve(io.cwd, flags.out), snapshotOnly: !!flags['snapshot-only'] }))
       : name === 'pull' ? pretty(flags.from
         ? pullFrom(work, resolve(io.cwd, flags.from), flags.versions ? readText(resolve(io.cwd, flags.versions)) : await io.stdin({ wait: 1500 }))
         : pullReads(work))

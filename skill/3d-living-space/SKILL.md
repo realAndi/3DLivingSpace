@@ -14,28 +14,32 @@ everything as you go, draw a labeled plan for you to compare with the floor plan
 and turn the unit into an Artifact page: a 3D model the person opens on their phone
 or computer, walks through, furnishes and shares.
 
-Everything runs through one script. Set `S` to this skill's `scripts` folder and
-keep the work in one folder per unit:
+Everything runs through one script, `scripts/space.mjs` in this skill's folder.
+It keeps the unit in a work folder (`./living-space` unless you pass `--dir`), so
+each call picks up where the last one left off:
 
 ```sh
 S=<this skill's folder>/scripts
-node $S/space.mjs doctor              # Node version, the renderer, the fonts
-node $S/space.mjs new --dir home      # a fresh unit in ./home (add --example for the demo unit)
-node $S/space.mjs help                # the tools; `help build_unit` for one tool's full input
+node $S/space.mjs doctor                  # Node, the plan renderer, the fonts
+node $S/space.mjs new                     # an empty unit (new --example: the demo apartment)
+node $S/space.mjs help                    # the tools and commands
+node $S/space.mjs help build_unit         # one tool: what it does, every field of its input
 ```
 
-Every tool takes its arguments as JSON (a file, `-` for stdin, or inline) and
-prints JSON back. Write the arguments to a file when they're long:
+The tools take one JSON object, inline, from a file, or `-` for stdin, and print
+JSON back. Write long arguments to a file:
 
 ```sh
-node $S/space.mjs build_unit home/build.json --dir home
-node $S/space.mjs render_plan --dir home      # writes home/plan.png: open it and look
+node $S/space.mjs get_catalog
+node $S/space.mjs build_unit living-space/build.json
+node $S/space.mjs render_plan             # writes living-space/plan.png: open it and look
 ```
 
-The tools are: `get_unit`, `get_catalog`, `build_unit`, `edit_unit`, `set_info`,
+The tools are `get_unit`, `get_catalog`, `build_unit`, `edit_unit`, `set_info`,
 `place_items`, `update_items`, `remove_items`, `create_asset`, `find_spots`,
-`check_unit`, `render_plan`. `references/tools.md` documents every field; read the
-part for a tool before its first call.
+`check_unit` and `render_plan`. Read `help <tool>` (or `references/tools.md`, where
+it exists) before a tool's first call: every field says its unit and default. Most
+outputs end with a `next` that says what to do after.
 
 ## Coordinates
 
@@ -102,39 +106,40 @@ already, what they want to do in each room.
 
 ## Publish it as an Artifact
 
-```sh
-node $S/space.mjs bundle --dir home     # writes home/artifact/ and prints the publish call
-```
+When the plan matches and nothing is reported:
 
-1. Call the **Artifact** tool with exactly what `bundle` printed (`file_path`,
-   `root`, `files`, `capabilities`, `icon`, `description`). The page is the full 3D
-   app; `unit.json` beside it is a snapshot that every visitor sees first, and the
-   only thing visitors who aren't signed in ever see.
-2. Run `node $S/space.mjs push --dir home --url <the artifact's URL>` and make the
-   **ArtifactData** `batch` call(s) it prints. That seeds the Artifact's database,
-   which is what makes it live: from then on, what you write shows up in their open
-   page within seconds, and what they change in the page comes back to you.
-3. Give them the link, and say what they can do there: Dollhouse, Plan and Walk
-   views, tap a door or a drawer, the tape measure, furnishing, the time of day. Say
-   how sharing works: the Share menu at the top of the Artifact; people they share it
-   with as Editors can furnish it; Contributors can make their own version and suggest
-   it back; Viewers, and anyone with a public link, can look around.
+1. `node $S/space.mjs bundle` writes the page's files and prints a `publish` object.
+   Call the **Artifact** tool with it as it is (`file_path`, `root`, `files`,
+   `capabilities`, `icon`, `description`). The page is the whole 3D app; `unit.json`
+   beside it is a snapshot that everyone sees first, and all that visitors who
+   aren't signed in ever see.
+2. `node $S/space.mjs push --url <the Artifact's URL>` prints the **ArtifactData**
+   `batch` call(s) that fill the Artifact's database; make them. That makes the page
+   live: from then on what you push shows up in their open page within seconds, and
+   what they change there comes back to you.
+3. Give them the link and say what they can do: Dollhouse, Plan and Walk views, tap
+   a door, a drawer or a lamp, the tape measure, the time of day, furnishing. And how
+   sharing works: the Share menu at the top of the Artifact. People they share it with
+   as Editors can furnish it; Contributors can make their own version and suggest it
+   back; Viewers, and anyone with a public link, can look around.
 
 ## Changing a published unit
 
-The person may have moved furniture in the page since. Before changing anything:
+They may have moved furniture in the page since you last looked, so:
 
-1. **Pull.** With ArtifactData, read `unit` (`list`, collection `unit`) and `assets`
-   (`list`) with `out_dir` set to `home/db`. Then pass the text the tool printed (the
-   lines with each document's version) to `pull`:
-   `node $S/space.mjs pull --from home/db --dir home <<'EOF'` … the listing … `EOF`
-2. Change the unit with the tools as before, and look at the plan.
-3. **Push.** `node $S/space.mjs push --dir home` prints the ArtifactData `batch` call(s)
-   with each document's version. If a write is refused because a document changed,
-   the person changed it meanwhile: pull again and redo your change on top.
-4. When a round of changes is done, refresh the snapshot that signed-out visitors
-   see: `node $S/space.mjs bundle --dir home --snapshot-only` and publish what it
-   prints (same Artifact URL; only `unit.json` changes, and open pages reload).
+1. **Pull.** `node $S/space.mjs pull` prints two ArtifactData reads; make them, then
+   run the `pull --from …` it shows with both results pasted in as they are (they
+   carry each document's version).
+2. Change the unit with the tools, and look at the plan.
+3. **Push.** `node $S/space.mjs push`, then make the `batch` call(s) it prints. If a
+   write is refused because a document changed, they saved in the page meanwhile:
+   pull again and redo your change on top. Pull before every push.
+4. When a round of changes is done, refresh the snapshot that signed-out visitors see:
+   `node $S/space.mjs bundle --snapshot-only` and publish what it prints (it replaces
+   only `unit.json`; open pages reload).
+
+If they send you a piece or a room from the page (an attachment naming a `piece_id`
+or a `room`), that's what they mean: pull, then act on it.
 
 ## Suggestions
 
@@ -147,9 +152,12 @@ with the tools and pushing.
 
 ## Without the Artifact tools
 
-Where there's no Artifact tool (claude.ai chat, the API), build and check the unit
-the same way and show the plan pictures. `bundle` still writes the page's files; tell
-the person the live, shareable page needs Claude Code.
+Where there's no Artifact tool (claude.ai chat, the API), build, check and draw the
+unit the same way and show them the plan. Then `node $S/space.mjs bundle --single`
+writes the whole page with their unit inside as one HTML file (about 4 MB): give
+them that file to download and open in a browser. It works offline except for the 3D
+library and fonts, keeps their furniture changes in that browser, and has no sharing;
+the live, shareable page needs Claude Code.
 
 ## Privacy
 
@@ -161,5 +169,5 @@ measurements and finishes you read off them.
 ## Demo
 
 `new --example` starts from the example unit, a 2 bed, 2 bath apartment traced from
-its leasing plan, without furniture: a quick way to show what the page does, or to
-practice furnishing.
+its leasing plan, without furniture: a quick way to show what the page does, to
+practice furnishing, or to show what a finished build looks like (`render_plan`).
