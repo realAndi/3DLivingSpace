@@ -2,11 +2,18 @@
 // by the browser (clearance lines, snapping) and the server (MCP tools). Feet.
 // `U` is a built unit (src/unit.js buildUnit). Pieces collide by their parts
 // (src/parts.js), so a chair tucks under a table; `assets` (the design's
-// custom assets, by id or as a list) gives custom pieces their parts.
+// custom assets, by id or as a list) gives custom pieces their parts. Parts
+// stand at the piece's height (y), so art hangs over a sofa and a lamp sits
+// on a table; a piece never collides with what holds it up or what rests on
+// it (src/stacking.js).
 
 import { footprint, isFlat } from './catalog.js';
-import { overlap, rectPoly, frontOf, polyBounds } from './geometry.js';
+import { overlap, rectPoly, frontOf, rightOf, polyBounds } from './geometry.js';
 import { pieceBody, pieceParts, placeBody, fixtureParts } from './parts.js';
+import { relatives, restingProblems, wallProblem } from './stacking.js';
+
+// Standing on the floor (not resting on something, hung or raised).
+export const onFloor = (item) => !item.on && !(item.y > 0.02);
 
 export { overlap };
 
@@ -32,7 +39,7 @@ export function clearances(item, others = [], obstacles = []) {
   const poly = footprint(item), b = polyBounds(poly), square = item.rot % 90 === 0;
   const obs = [
     ...obstacles.map((r) => ({ poly: rectPoly(r), b: r, square: true })),
-    ...others.filter((o) => o !== item && o.uid !== item.uid && !isFlat(o))
+    ...others.filter((o) => o !== item && o.uid !== item.uid && !isFlat(o) && onFloor(o))
       .map((o) => { const op = footprint(o); return { poly: op, b: polyBounds(op), square: o.rot % 90 === 0 }; }),
   ];
   const sides = [
@@ -74,8 +81,8 @@ export function clearances(item, others = [], obstacles = []) {
 }
 
 // What is wrong with where a piece sits, as short sentences. Parts that only
-// meet, or pass over and under each other (a chair's seat under a table),
-// are fine.
+// meet, or pass over and under each other (a chair's seat under a table, art
+// over a sofa), are fine; so are a piece and what holds it up.
 export function problems(item, others = [], U = null, assets = null) {
   if (!U) return [];
   const out = [];
@@ -88,14 +95,17 @@ export function problems(item, others = [], U = null, assets = null) {
     out.push(s.kind === 'wall' ? 'runs into a wall' : `overlaps the ${s.name.toLowerCase()}`);
   }
   if (!isFlat(item)) {
-    for (const d of U.doorSwings) if (parts.some((p) => overlap(p.poly, d.poly, 0.1))) out.push(`blocks the ${d.name.toLowerCase()} from opening`);
+    // A door's swing reaches up to its head; art above a door doesn't block it.
+    for (const d of U.doorSwings) if (parts.some((p) => p.y0 < (d.head ?? 99) - 0.04 && overlap(p.poly, d.poly, 0.1))) out.push(`blocks the ${d.name.toLowerCase()} from opening`);
+    const near = relatives(item, others);
     for (const o of others) {
-      if (o === item || o.uid === item.uid || isFlat(o)) continue;
+      if (o === item || o.uid === item.uid || isFlat(o) || near.has(o.uid) || relatives(o, others).has(item.uid)) continue;
       const ob = pieceBody(o, assets).box;
       if (o.x + ob[0] >= box[2] || o.x + ob[2] <= box[0] || o.z + ob[1] >= box[3] || o.z + ob[3] <= box[1]) continue;
       if (meets(parts, pieceParts(o, assets))) out.push(`overlaps ${o.name}${o.uid ? ` (${o.uid})` : ''}`);
     }
   }
+  out.push(...restingProblems(item, others, U, assets));
   return [...new Set(out)];
 }
 
@@ -234,15 +244,17 @@ export function collisionShapes(U) {
 }
 
 // The shapes a piece must keep clear of: the unit's, plus the parts of the
-// other standing pieces. Only what reaches below the piece's top can hit it.
+// other pieces, leaving out what holds it up and what rests on it (they move
+// with it). Only what reaches between the piece's underside and top can hit it.
 export function blockersFor(item, U, items = [], assets = null) {
-  const top = pieceBody(item, assets).y1 - 1e-3;
-  const own = collisionShapes(U).filter((s) => s.y0 < top);
+  const body = pieceBody(item, assets), top = body.y1 - 1e-3, bottom = body.y0 + 1e-3;
+  const own = collisionShapes(U).filter((s) => s.y0 < top && s.y1 > bottom);
   if (isFlat(item)) return own;
   const out = [...own];
+  const near = relatives(item, items);
   for (const o of items) {
-    if (o.uid === item.uid || isFlat(o)) continue;
-    for (const p of pieceParts(o, assets)) if (p.y0 < top) out.push({ ...p, kind: 'piece', uid: o.uid });
+    if (o.uid === item.uid || isFlat(o) || near.has(o.uid)) continue;
+    for (const p of pieceParts(o, assets)) if (p.y0 < top && p.y1 > bottom) out.push({ ...p, kind: 'piece', uid: o.uid });
   }
   return out;
 }
@@ -346,13 +358,32 @@ export function slideTo(item, tx, tz, shapes, assets = null) {
   return { x, z };
 }
 
+// Slide a hung piece along its wall toward (tx, tz): it stops where the wall
+// behind it ends at its height (a window, a doorway, a corner) and, flush,
+// against anything in `shapes`. One that isn't on a wall slides freely.
+export function slideOnWall(item, tx, tz, U, shapes, assets = null) {
+  if (!U || wallProblem(item, U)) return slideTo(item, tx, tz, shapes, assets);
+  const u = rightOf(item.rot);
+  const along = (tx - item.x) * u[0] + (tz - item.z) * u[1];
+  const at = (k) => ({ ...item, x: item.x + u[0] * k, z: item.z + u[1] * k });
+  const step = Math.sign(along) / 48;
+  let reach = 0;
+  for (let k = step; Math.abs(k) <= Math.abs(along); k += step) {
+    if (wallProblem(at(k), U)) break;
+    reach = k;
+  }
+  if (Math.abs(along - reach) < Math.abs(step) && !wallProblem(at(along), U)) reach = along;
+  const end = at(reach);
+  return slideTo(item, end.x, end.z, shapes, assets);
+}
+
 // A piece set down by an agent a little into a wall or its trim (an outline's
 // edge is the wall's face, so a sofa placed there sinks into the baseboard) is
 // eased out, up to 3". Other pieces are left alone: chairs may tuck under tables.
 export function settleOffWalls(item, U, assets = null) {
   if (!U || isFlat(item)) return null;
-  const top = pieceBody(item, assets).y1 - 1e-3;
-  const shapes = collisionShapes(U).filter((s) => (s.kind === 'wall' || s.kind === 'trim') && s.y0 < top);
+  const body = pieceBody(item, assets), top = body.y1 - 1e-3, bottom = body.y0 + 1e-3;
+  const shapes = collisionShapes(U).filter((s) => (s.kind === 'wall' || s.kind === 'trim') && s.y0 < top && s.y1 > bottom);
   if (!collides(item, shapes, assets)) return null;
   return pushOut(item, shapes, 0.25, assets);
 }
