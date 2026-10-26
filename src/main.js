@@ -130,7 +130,8 @@ function buildPlanOverlay() {
   $('#overlayToggle').hidden = !pi;
   if (!pi) { $('#optOverlay').checked = false; return; }
   if (!planTextures.has(pi.src)) {
-    const tex = new THREE.TextureLoader().load(pi.src, () => invalidate());
+    // A one-file copy of the app carries the picture inline (keyed by its src).
+    const tex = new THREE.TextureLoader().load(globalThis.LIVING_SPACE_PLANS?.[pi.src] ?? pi.src, () => invalidate());
     tex.colorSpace = THREE.SRGBColorSpace;
     tex.anisotropy = 4;
     planTextures.set(pi.src, tex);
