@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, realpathSync, cpSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { createHash } from 'node:crypto';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { run } from '../skill/3d-living-space/scripts/space.mjs';
@@ -434,6 +435,17 @@ test('skill: the packaged skill runs on its own, with no node_modules and nothin
   assert.ok(names.length > all.length && names.every((n) => n.startsWith('3d-living-space/')));
   assert.ok(all.every((f) => names.includes(`3d-living-space/${f}`)));
   if (spawnSync('unzip', ['-v']).status === 0) assert.equal(spawnSync('unzip', ['-tq', join(out, '3d-living-space.zip')]).status, 0);
+
+  // The same skill as a plugin, and the marketplace entry that pins its zip.
+  const plugin = join(out, '3d-living-space-plugin');
+  const manifest = JSON.parse(readFileSync(join(plugin, '.claude-plugin/plugin.json'), 'utf8'));
+  assert.deepEqual([manifest.name, manifest.version], ['3d-living-space', JSON.parse(readFileSync(join(ROOT, 'skill/plugin.json'), 'utf8')).version]);
+  for (const f of ['README.md', '.claude-plugin/icon.png', 'skills/3d-living-space/SKILL.md', 'skills/3d-living-space/scripts/space.mjs']) assert.ok(existsSync(join(plugin, f)), f);
+  const catalog = JSON.parse(readFileSync(join(out, 'marketplace.json'), 'utf8'));
+  const entry = catalog.plugins[0];
+  assert.equal(entry.name, manifest.name);
+  assert.equal(entry.source.url, `https://github.com/realAndi/3DLivingSpace/releases/download/skill-v${manifest.version}/3d-living-space-plugin.zip`);
+  assert.equal(entry.source.sha256, createHash('sha256').update(readFileSync(join(out, '3d-living-space-plugin.zip'))).digest('hex'));
 
   // Run it from elsewhere, allowed to read only itself and the work dir.
   const space = (...args) => {

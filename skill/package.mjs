@@ -11,12 +11,15 @@
 //   scripts/fonts/          IBM Plex (OFL), as server/render.js draws with
 //   app/                    the Artifact's files (scripts/app.mjs), so bundle needs no repo
 //
-//   node skill/package.mjs [--out <dir>] [--no-zip]
+// Then the same skill as a Claude plugin, and the marketplace that lists it (below).
+//
+//   node skill/package.mjs [--out <dir>] [--no-zip] [--marketplace]
 import { readFileSync, writeFileSync, mkdirSync, rmSync, readdirSync, copyFileSync, cpSync, existsSync, statSync } from 'node:fs';
 import { join, dirname, resolve, posix } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { deflateRawSync, crc32 } from 'node:zlib';
 import { moduleGraph, assembleApp } from './3d-living-space/scripts/app.mjs';
 
@@ -177,10 +180,56 @@ const lines = [
   `  scripts/lib: ${libs.length} modules; vendor: zod ${zodVersion} (${zodFiles.length} files), ${resvg.name} ${resvg.version}; app: ${app.length} files`,
   `  SKILL.md: ${existsSync(join(DEST, 'SKILL.md')) ? 'yes' : 'not written yet'}`,
 ];
+// ---------------------------------------------------------------------------
+// The plugin: the same skill as a Claude plugin, which claude.ai, the desktop
+// app and Claude Code all install (Customize > Plugins > Upload plugin, a
+// marketplace, or unzipped into ~/.claude/skills): .claude-plugin/plugin.json
+// from skill/plugin.json, the skill under skills/, and skill/README.md.
+const MANIFEST = JSON.parse(readFileSync(join(ROOT, 'skill', 'plugin.json'), 'utf8'));
+const PLUGIN = join(outRoot, `${NAME}-plugin`);
+rmSync(PLUGIN, { recursive: true, force: true });
+mkdirSync(join(PLUGIN, '.claude-plugin'), { recursive: true });
+writeFileSync(join(PLUGIN, '.claude-plugin', 'plugin.json'), `${JSON.stringify(MANIFEST, null, 2)}\n`);
+cpSync(DEST, join(PLUGIN, 'skills', NAME), { recursive: true });
+copyFileSync(join(ROOT, 'skill', 'README.md'), join(PLUGIN, 'README.md'));
+// The site's own mark (index.html's favicon), as the listing icon on claude.ai.
+copyFileSync(join(ROOT, 'skill', 'icon.png'), join(PLUGIN, '.claude-plugin', 'icon.png'));
+lines.push(`${PLUGIN}: plugin ${MANIFEST.name} ${MANIFEST.version}`);
+
+// The marketplace: one entry, the plugin's zip as the GitHub release asset of
+// skill-v<version>, pinned by its sha256. Users add it by the release's
+// latest/download URL, or (with --marketplace, written into the repo's own
+// .claude-plugin/) by the repository.
+const REPO = /github\.com\/([^/]+\/[^/#]+)/.exec(MANIFEST.repository)?.[1];
+if (!REPO) throw new Error('skill/plugin.json needs its GitHub "repository".');
+const TAG = `skill-v${MANIFEST.version}`;
+
 if (!argv.includes('--no-zip')) {
   const file = join(outRoot, `${NAME}.zip`);
   const data = zip(DEST, NAME);
   writeFileSync(file, data);
   lines.push(`${file}: ${mb(data.length)}`);
+  const pluginFile = join(outRoot, `${NAME}-plugin.zip`);
+  const pluginZip = zip(PLUGIN, NAME);
+  writeFileSync(pluginFile, pluginZip);
+  lines.push(`${pluginFile}: ${mb(pluginZip.length)}`);
+  const catalog = {
+    name: '3dlivingspace',
+    description: 'Build, furnish and share a to-scale 3D model of your apartment with Claude.',
+    owner: MANIFEST.author,
+    plugins: [{
+      name: MANIFEST.name,
+      description: MANIFEST.description,
+      source: { source: 'archive', url: `https://github.com/${REPO}/releases/download/${TAG}/${NAME}-plugin.zip`, sha256: createHash('sha256').update(pluginZip).digest('hex') },
+    }],
+  };
+  const text = `${JSON.stringify(catalog, null, 2)}\n`;
+  writeFileSync(join(outRoot, 'marketplace.json'), text);
+  lines.push(`${join(outRoot, 'marketplace.json')}: for ${TAG}`);
+  if (argv.includes('--marketplace')) {
+    mkdirSync(join(ROOT, '.claude-plugin'), { recursive: true });
+    writeFileSync(join(ROOT, '.claude-plugin', 'marketplace.json'), text);
+    lines.push(`${join(ROOT, '.claude-plugin', 'marketplace.json')}: updated`);
+  }
 }
 console.log(lines.join('\n'));

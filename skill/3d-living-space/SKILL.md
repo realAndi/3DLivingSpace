@@ -16,10 +16,12 @@ or computer, walks through, furnishes and shares.
 
 Everything runs through one script, `scripts/space.mjs` in this skill's folder.
 It keeps the unit in a work folder (`./living-space` unless you pass `--dir`), so
-each call picks up where the last one left off:
+each call picks up where the last one left off. Set `S` once: Claude Code and
+Cowork fill in `${CLAUDE_SKILL_DIR}`; where it stays as written (claude.ai chat),
+use the `scripts` folder beside this file instead.
 
 ```sh
-S=<this skill's folder>/scripts
+S=${CLAUDE_SKILL_DIR}/scripts
 node $S/space.mjs doctor                  # Node, the plan renderer, the fonts
 node $S/space.mjs new                     # an empty unit (new --example: the demo apartment)
 node $S/space.mjs help                    # the tools and commands

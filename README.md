@@ -110,19 +110,35 @@ and photos in a conversation; Claude builds the unit, checks it against the plan
 publishes it and gives them the link; they walk through it, furnish it and share
 it from claude.ai's Share menu.
 
-**Install.** `npm run skill` builds `dist/3d-living-space/` and
-`dist/3d-living-space.zip` (about 4 MB: the scripts, the `src/` modules they
-use, zod and resvg's WebAssembly build vendored, the fonts, and the app's files
-prebuilt). Nothing needs installing where it runs: only Node 18 or later.
+**Install.** Each [release](https://github.com/realAndi/3DLivingSpace/releases/latest)
+carries the skill as a plugin, which every Claude app installs, and on its own:
 
-- **Claude Code** (CLI or desktop app, where the Artifact and ArtifactData tools
-  are): copy the folder to `~/.claude/skills/` (or a project's
-  `.claude/skills/`), then ask "Build my apartment in 3D from this floor plan"
-  with the plan attached.
-- **claude.ai:** upload the zip under Customize, Skills (code execution on).
+- **claude.ai, the Claude desktop app and Cowork:** download
+  `3d-living-space-plugin.zip` and add it under Customize, Plugins, Add, Upload
+  plugin (code execution on). It then reaches Claude Code on the same account too.
   Chat there has no Artifact tool to publish with, so Claude builds, checks and
   draws the unit the same way and hands over the page as one HTML file
-  (`bundle --single`) to download and open.
+  (`bundle --single`) to download and open. The live, shareable page needs Claude
+  Code (or the desktop app's Code tab).
+- **Claude Code:** `/plugin marketplace add https://github.com/realAndi/3DLivingSpace/releases/latest/download/marketplace.json`,
+  then `/plugin install 3d-living-space@3dlivingspace`; or unzip either zip into
+  `~/.claude/skills/`. Then attach a floor plan and ask Claude to build it in 3D.
+- **The skill alone:** `3d-living-space.zip`, for Customize, Skills on claude.ai.
+
+Nothing needs installing where it runs but Node 18 or later: the zips carry the
+scripts, the `src/` modules they use, zod and resvg's WebAssembly build
+vendored, the fonts, and the app's files prebuilt.
+
+**Releasing it.** Raise `version` in `skill/plugin.json`, then:
+
+```sh
+npm run skill -- --marketplace     # dist/: both zips and marketplace.json; .claude-plugin/marketplace.json pins the new zip
+git commit -am "Skill <version>" && git tag -a skill-v<version> -m "Skill <version>" && git push --follow-tags
+gh release create skill-v<version> dist/3d-living-space-plugin.zip dist/3d-living-space.zip dist/marketplace.json
+```
+
+The marketplace's one entry is the plugin zip of that release, pinned by its
+sha256, so upload exactly the files that build wrote.
 
 **The scripts.** `node scripts/space.mjs <command>`, over a work folder that holds
 the unit between calls:
