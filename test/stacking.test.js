@@ -180,3 +180,10 @@ test('saved supports point at something that exists, with no loops', () => {
   assert.deepEqual(on, { table001: null, lamp0001: 'p:table001', lamp0002: null, loopa001: null, loopb001: 'p:loopa001', maker001: 'f:kitchen', maker002: null, art00001: 'wall' });
   assert.equal(d.items.find((i) => i.uid === 'lamp0002').y, 2.5, 'keeps its height');
 });
+
+test('a piece standing in a doorway is caught; art above it is not', () => {
+  const shelf = piece('bookshelf', -0.19, 7, { rot: 90 });
+  assert.match(problems(shelf, [shelf], U).join(), /stands in the doorway of the bedroom door/);
+  const art = piece('wall-art', 0.06, 7, { rot: 90, y: 7, on: 'wall' });
+  assert.ok(!problems(art, [art], U).some((p) => /doorway of/.test(p)));
+});

@@ -553,7 +553,7 @@ Returns the same report as build_unit. Check the result with render_plan.`,
       inputSchema: {
         items: z.array(z.object({
           type: z.string().describe('Catalog type, or "asset:<asset_id>".'),
-          id: z.string().regex(/^[A-Za-z0-9_-]{4,24}$/, 'An id is 4 to 24 letters, digits, - or _.').optional().describe('An id you choose (4 to 24 letters, digits, - or _), so later pieces in this call can rest on it. Default: a random one.'),
+          id: z.string().regex(/^[A-Za-z0-9_-]{2,24}$/, 'An id is 2 to 24 letters, digits, - or _.').optional().describe('An id you choose (2 to 24 letters, digits, - or _, like "sofa" or "bed-1"), so later pieces in this call can rest on it. Default: a random one.'),
           ...itemShape, at: itemShape.at.optional(),
         })).min(1).max(60).describe('Pieces to add, in order.'),
       },

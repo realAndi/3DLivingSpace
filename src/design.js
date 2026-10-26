@@ -36,7 +36,7 @@ export function randomId(length = 10) {
 
 const num = (v, lo, hi, dflt) => (Number.isFinite(+v) && v !== null && v !== '' ? Math.min(hi, Math.max(lo, +v)) : dflt);
 const text = (v, max) => (typeof v === 'string' ? v.replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, max) : '');
-const uidOk = (v) => typeof v === 'string' && /^[A-Za-z0-9_-]{4,24}$/.test(v);
+const uidOk = (v) => typeof v === 'string' && /^[A-Za-z0-9_-]{2,24}$/.test(v);
 const r3 = (v) => Math.round(v * 1000) / 1000;
 
 export function cleanColor(v) {
@@ -112,7 +112,7 @@ export function cleanAsset(raw) {
 }
 
 // ---------------------------------------------------------------- items
-const ON = /^(wall|ceiling|p:[A-Za-z0-9_-]{4,24}|f:[A-Za-z0-9][A-Za-z0-9_-]{0,23})$/;
+const ON = /^(wall|ceiling|p:[A-Za-z0-9_-]{2,24}|f:[A-Za-z0-9][A-Za-z0-9_-]{0,23})$/;
 export const cleanOn = (v) => (typeof v === 'string' && ON.test(v) ? v : null);
 
 export function cleanItem(raw, assets = {}) {

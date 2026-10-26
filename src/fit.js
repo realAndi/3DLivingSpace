@@ -97,6 +97,11 @@ export function problems(item, others = [], U = null, assets = null) {
   if (!isFlat(item)) {
     // A door's swing reaches up to its head; art above a door doesn't block it.
     for (const d of U.doorSwings) if (parts.some((p) => p.y0 < (d.head ?? 99) - 0.04 && overlap(p.poly, d.poly, 0.1))) out.push(`blocks the ${d.name.toLowerCase()} from opening`);
+    // Nor may anything stand in a doorway, under its head.
+    for (const o of U.openings) {
+      if (o.kind === 'window') continue;
+      if (parts.some((p) => p.y0 < o.head - 0.04 && overlap(p.poly, o.poly, 0.1))) out.push(`stands in the doorway of the ${o.name.toLowerCase()}`);
+    }
     const near = relatives(item, others);
     for (const o of others) {
       if (o === item || o.uid === item.uid || isFlat(o) || near.has(o.uid)) continue;

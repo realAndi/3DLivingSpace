@@ -172,6 +172,9 @@ export const facing = (n) => Math.round(((((Math.atan2(n[0], -n[1]) * 180) / Mat
 export function hangOnWall(item, x, z, U, { y = item.y ?? 0, reach = 3 } = {}) {
   if (!U) return null;
   const sheer = actOf(item) === 'curtain';
+  // Faces of the room the point is in come first: a point near a wall
+  // between two rooms means this room's side of it.
+  const here = U.roomAt(x, z)?.id ?? null;
   let best = null;
   for (const e of U.edges) {
     const dx = x - e.p[0], dz = z - e.p[1];
@@ -181,7 +184,7 @@ export function hangOnWall(item, x, z, U, { y = item.y ?? 0, reach = 3 } = {}) {
     // Kept between the edge's ends, clear of the walls at its corners.
     const half = item.w / 2, along = dx * e.u[0] + dz * e.u[1];
     const s = e.len >= item.w ? Math.max(half, Math.min(e.len - half, along)) : e.len / 2;
-    const off = Math.hypot(t > 0 ? 0 : t, along - s);
+    const off = Math.hypot(t, along - s) + (here && e.room !== here ? 1 : 0);
     if (off > reach) continue;
     // Wall behind all of it, high enough.
     const ok = across(item.w).map((k) => s + k).every((k) => {
