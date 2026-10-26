@@ -4,7 +4,8 @@
 // Artifact (window.LIVING_SPACE === 'artifact').
 //
 // The page paints at once from the snapshot published with it (unit.json:
-// { title, author, unit, unitRev, items, assets, savedAt }), read-only. When
+// { title, author, unit, unitRev, items, assets, savedAt }, or
+// window.LIVING_SPACE_SNAPSHOT in the one-file copy), read-only. When
 // the viewer's `db` and `user` answer (never during the page's first run; null
 // when signed out, or when nobody answers within 10 s) it lights up: once the
 // database holds unit/spec it is the unit, and changes to it (Claude's, another
@@ -176,14 +177,18 @@ export class ArtifactSession {
 
   // ---------------------------------------------------------------- opening
 
-  // The snapshot first, so the page paints at once; then the database.
+  // The snapshot first, so the page paints at once; then the database. The
+  // one-file copy (skill/3d-living-space/scripts/single.mjs) carries its
+  // snapshot along, and has no database.
   async start() {
     if (this.role !== 'loading') return;
-    let raw = null;
-    try {
-      const res = await fetch('./unit.json', { cache: 'no-store' });
-      if (res.ok) raw = await res.json();
-    } catch { /* no snapshot: an empty unit */ }
+    let raw = window.LIVING_SPACE_SNAPSHOT ?? null;
+    if (!raw) {
+      try {
+        const res = await fetch('./unit.json', { cache: 'no-store' });
+        if (res.ok) raw = await res.json();
+      } catch { /* no snapshot: an empty unit */ }
+    }
     const s = raw && typeof raw === 'object' ? raw : {};
     const assets = assetsOf(s.assets);
     this.shared = {
@@ -268,8 +273,8 @@ export class ArtifactSession {
       if (changed.unit) this.unitRev++;
       this.onLoad?.(this.#doc(), this);
     } else if (changed.unit || changed.items || changed.assets) this.#remote(changed.unit);
-    this.#settled();
-    this.#emit();
+    if (this.connecting) this.#settled();
+    else this.#emit();
   }
 
   // Take the database into the unit on screen. It is the unit once it holds
@@ -332,9 +337,10 @@ export class ArtifactSession {
         const items = clone(this.shared.items);
         this.own = { base: clone(items), items, savedAt: Date.now() };
         this.ownDirty = true;
+        // Kept before it opens: where it lives says whether it can be suggested.
+        await this.flush();
       }
       this.#show('own');
-      if (created) await this.flush();
       return { ...this.#doc(), created };
     } finally {
       this.busy = false;
@@ -352,11 +358,12 @@ export class ArtifactSession {
   }
 
   #show(which) {
-    clearTimeout(this.timer);
     const own = which === 'own';
+    // A version that couldn't be kept says so (and is tried again on its own).
+    const failed = own && this.ownDirty && this.status === 'error';
     Object.assign(this, {
       showing: which, id: own ? 'own' : 'unit', forkedFrom: own ? 'unit' : null,
-      role: own || this.#editor() ? 'owner' : 'viewer', status: own ? 'saved' : 'idle', error: null,
+      role: own || this.#editor() ? 'owner' : 'viewer', status: failed ? 'error' : own ? 'saved' : 'idle', error: failed ? this.error : null,
     });
     this.onLoad?.(this.#doc(), this);
     this.#emit();

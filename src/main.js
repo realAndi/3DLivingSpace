@@ -860,7 +860,7 @@ function renderInClaude(ss, empty) {
   ui.lede.textContent = ss.role === 'loading' ? ''
     : empty ? (editor ? 'Nothing built yet. Ask Claude to build it from your floor plan and photos.' : 'Nothing built yet. It shows up here as soon as Claude builds it.')
       : editor ? 'Furnish it, measure it and walk through it. Everyone who opens this page sees your changes.'
-        : own ? 'Your own version. Move things around and add pieces; the original stays as it is.'
+        : own ? 'Your own version. Furnish it your way, measure it and walk through it.'
           : ss.hasVersion ? 'A to-scale model of an apartment. Look around, or open your own version of it.'
             : 'A to-scale model of an apartment. Look around, then make your own version to furnish it your way.';
 
