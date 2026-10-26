@@ -42,6 +42,14 @@ who can look around and make their own version.
   you set, slide along it and stop at windows, doorways and corners. Ceiling
   pieces (pendants, fans) hang from the ceiling. Moving a table carries what's
   on it; deleting it takes them too.
+- **Time of day and lights.** The sun follows your clock (or the time slider in
+  the lights panel, the sun/moon button), coming in the windows the unit's
+  `north` says it should, with the sky and exposure to match. Each room's
+  ceiling lights switch together, from the light switch drawn by its door or
+  from the panel; they and the lamps are on "auto" (on while it's dark out)
+  until you flip them. A few real lights go to the room you're in and the
+  nearest lit ones; the rest glow. Plan stays evenly lit. Lights, like open
+  doors, are yours alone: nothing you switch is saved.
 - **Tape measure** in every view: along the floor in Plan, between any two
   surfaces (heights too) in Dollhouse and Walk.
 - **Units:** Feet & inches, Inches, or Centimeters (Tools tab), per browser.
@@ -157,7 +165,8 @@ fixes the origin used in links.
 | `src/sync.js` | Opening, creating, copying and saving units; live updates |
 | `src/measure.js`, `src/walk.js`, `src/units.js` | Tape measure, first-person controls, display units |
 | `src/materials.js`, `src/textures.js`, `assets/tex/` | Materials with color, normal and roughness maps: finishes drawn in code, and CC0 scans of fabric, leather, carpet, walnut, marble and concrete (sources in `assets/tex/SOURCES.md`), loaded when first used at a quality that suits the device |
-| `src/surroundings.js` | The view out the windows |
+| `src/surroundings.js` | The view out the windows, by day and by night |
+| `src/lighting.js`, `src/lightpanel.js` | The sun, sky and exposure by time of day; room lights, switches and lamps on a fixed pool of real lights; the lights panel |
 | `server/` | HTTP server, units API, per-unit MCP servers, plan pictures (`render.js`, IBM Plex fonts under the OFL) |
 
 ## Deploying
