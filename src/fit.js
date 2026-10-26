@@ -384,6 +384,7 @@ export function slideOnWall(item, tx, tz, U, shapes, assets = null) {
   if (!U || wallProblem(item, U)) return slideTo(item, tx, tz, shapes, assets);
   const u = rightOf(item.rot);
   const along = (tx - item.x) * u[0] + (tz - item.z) * u[1];
+  if (Math.abs(along) < 1e-9) return { x: item.x, z: item.z };
   const at = (k) => ({ ...item, x: item.x + u[0] * k, z: item.z + u[1] * k });
   const step = Math.sign(along) / 48;
   let reach = 0;

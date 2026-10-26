@@ -141,6 +141,8 @@ test('art hangs on a wall over a sofa; not over a window; curtains may', () => {
   assert.ok(near(slid.x, 7 - art.w / 2, 0.05), `stopped at the window (${slid.x})`);
   const back = slideOnWall(art, -5, art.z, U, shapes);
   assert.ok(near(back.x, art.w / 2, 0.05), `stopped at the corner (${back.x})`);
+  // Straight out from the wall is no move along it.
+  assert.deepEqual(slideOnWall(art, art.x, art.z + 2, U, shapes), { x: art.x, z: art.z });
 });
 
 test('art above a door doesn\'t block its swing; lower down it covers the doorway', () => {
