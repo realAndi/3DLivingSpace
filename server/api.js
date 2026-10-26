@@ -7,6 +7,12 @@
 //   POST  api/units/:id/fork      anyone: a copy that you own
 //   GET / PUT / DELETE api/units/:id/code   X-Edit-Key: whether an edit code is set; set { code }; remove it
 //   POST  api/units/:id/unlock    { code } → the unit with its key, as if you owned it (rate-limited)
+//   Suggestions (src/changes.js), X-Edit-Key throughout:
+//   POST  api/units/:copy/suggest            { note } → offer a copy's layout to the unit it came from
+//   GET / DELETE api/units/:copy/suggestion  what this copy has suggested; withdraw it
+//   GET   api/units/:id/suggestions          the suggestions waiting, with their layouts
+//   POST  api/units/:id/suggestions/:sid/apply  { groups: [...] | 'all' } → take those changes
+//   POST  api/units/:id/suggestions/:sid/dismiss | undo
 //   GET   api/units/:id/card.png  link-preview picture (1200 × 630)
 //   GET   api/units/:id/plan.png  labeled plan, as the MCP server draws it
 //   GET   api/card.png            the home page's preview: the example unit
@@ -99,6 +105,32 @@ export function createApi(config, units, limiters) {
       const { code } = await body(ctx);
       const { row, key } = await units.unlock(id, typeof code === 'string' ? code : '');
       json(ctx.res, 200, owned(row, key, origin));
+      return true;
+    }
+    // Suggestions.
+    const editKey = () => (typeof ctx.req.headers['x-edit-key'] === 'string' ? ctx.req.headers['x-edit-key'] : '');
+    if (parts.length === 3 && parts[2] === 'suggest' && method === 'POST') {
+      limit(limiters.suggest, ctx.ip, 'suggestions');
+      const { note } = await body(ctx);
+      json(ctx.res, 200, units.suggest(id, editKey(), { note }));
+      return true;
+    }
+    if (parts.length === 3 && parts[2] === 'suggestion' && (method === 'GET' || method === 'DELETE')) {
+      limit(limiters.write, ctx.ip, 'changes');
+      json(ctx.res, 200, method === 'GET' ? units.mySuggestion(id, editKey()) : units.withdraw(id, editKey()));
+      return true;
+    }
+    if (parts.length === 3 && parts[2] === 'suggestions' && method === 'GET') {
+      limit(limiters.read, ctx.ip);
+      json(ctx.res, 200, { suggestions: units.suggestions(id, editKey()) });
+      return true;
+    }
+    if (parts.length === 5 && parts[2] === 'suggestions' && ['apply', 'dismiss', 'undo'].includes(parts[4]) && method === 'POST') {
+      limit(limiters.write, ctx.ip, 'changes');
+      const sid = parts[3];
+      if (parts[4] === 'dismiss') { units.dismissSuggestion(id, editKey(), sid); json(ctx.res, 200, { ok: true }); return true; }
+      const out = parts[4] === 'apply' ? units.applySuggestion(id, editKey(), sid, (await body(ctx)).groups ?? 'all') : units.undoSuggestion(id, editKey(), sid);
+      json(ctx.res, 200, { version: out.row.version, applied: out.applied, design: units.view(out.row, origin) });
       return true;
     }
     if (parts.length === 3 && (parts[2] === 'card.png' || parts[2] === 'plan.png') && read) {

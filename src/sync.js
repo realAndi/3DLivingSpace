@@ -254,6 +254,48 @@ export class UnitSession {
     }
   }
 
+  // Suggestions (server/service.js, src/changes.js). Each returns the server's
+  // answer, or { error } saying why not. Applying and undoing bring the unit's
+  // new layout in through onRemote, as another device's edits would.
+  async #call(path, { method = 'GET', body } = {}) {
+    if (!this.editable) return { error: 'Only the owner can do that.' };
+    let res;
+    try {
+      res = await fetch(`api/units/${this.id}/${path}`, {
+        method, cache: 'no-store', headers: { 'Content-Type': 'application/json', 'X-Edit-Key': this.key }, body: body ? JSON.stringify(body) : undefined,
+      });
+    } catch { return { error: 'Can\'t reach the server. Try again.' }; }
+    const out = await res.json().catch(() => ({}));
+    return res.ok ? out : { error: out.error ?? 'That didn\'t work. Try again.' };
+  }
+
+  // A copy's own suggestion: { to: { id, title, author } | null, status:
+  // 'none' | 'open' | 'applied' | 'dismissed', note, changes, sentAt }.
+  mySuggestion() { return this.#call('suggestion'); }
+  async suggest(note = '') { await this.flush(); return this.#call('suggest', { method: 'POST', body: { note } }); }
+  withdrawSuggestion() { return this.#call('suggestion', { method: 'DELETE' }); }
+
+  // The suggestions waiting for this unit: [{ id, from, author, title, note,
+  // createdAt, updatedAt, base, items, assets, changes }].
+  async suggestions() {
+    const out = await this.#call('suggestions');
+    return out.error ? out : out.suggestions;
+  }
+
+  // Take changes (layoutChanges group ids, or 'all'): { applied } or { error }.
+  async applySuggestion(sid, groups = 'all') {
+    await this.flush();
+    const out = await this.#call(`suggestions/${sid}/apply`, { method: 'POST', body: { groups } });
+    if (out.design) { this.#remote(out.design); this.#emit(); }
+    return out;
+  }
+  dismissSuggestion(sid) { return this.#call(`suggestions/${sid}/dismiss`, { method: 'POST' }); }
+  async undoSuggestion(sid) {
+    const out = await this.#call(`suggestions/${sid}/undo`, { method: 'POST' });
+    if (out.design) { this.#remote(out.design); this.#emit(); }
+    return out;
+  }
+
   // Changes from the furniture editor: { upsert: [items], remove: [uids] }.
   queue({ upsert = [], remove = [] }) {
     if (!this.editable) return;

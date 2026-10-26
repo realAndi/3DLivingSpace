@@ -27,6 +27,7 @@ const limiters = {
   mcp: new RateLimiter(900, 10 * 60 * 1000),
   unlock: new RateLimiter(8, 15 * 60 * 1000),      // edit code guesses per address, per 15 minutes
   unlockUnit: new RateLimiter(40, 60 * 60 * 1000), // and per unit, from anywhere, per hour
+  suggest: new RateLimiter(30, 60 * 60 * 1000),    // suggestions sent or updated, per hour
 };
 const handlers = [createApi(config, units, limiters), createMcp(config, units, limiters), createPages(config, units)];
 

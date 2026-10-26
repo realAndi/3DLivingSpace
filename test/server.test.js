@@ -464,3 +464,68 @@ test('edit codes: the owner sets one, another device trades it for the key; gues
   for (let i = 0; i < 3 && status !== 429; i++) status = (await unlock(`guess${i}xx`)).status;
   assert.equal(status, 429);
 });
+
+test('suggestions: a copy suggests its layout back; the owner applies part of it, undoes, dismisses', async () => {
+  const owner = await create({ from: 'example', title: 'Home' });
+  const patch = (u, body) => api(`api/units/${u.id}`, { method: 'PATCH', key: u.key, body });
+  await patch(owner, { upsert: [
+    { uid: 'sofa0001', type: 'sofa', x: 30, z: 22, rot: 180 },
+    { uid: 'side0001', type: 'sidetable', x: 35.5, z: 23.5 },
+    { uid: 'lamp0001', type: 'table-lamp', x: 35.5, z: 23.5, y: 2, on: 'p:side0001' },
+    { uid: 'chair001', type: 'chair', x: 33, z: 15 },
+  ] });
+
+  // A visitor makes their own version and rearranges it.
+  const copy = await (await api(`api/units/${owner.id}/fork`, { method: 'POST', body: {} })).json();
+  const mine = (path, method = 'GET', body) => api(`api/units/${copy.id}/${path}`, { method, key: copy.key, body });
+  assert.deepEqual(await (await mine('suggestion')).json(), { to: { id: owner.id, title: 'Home', author: '' }, status: 'none', note: '', sentAt: null, changes: 0 });
+  assert.match((await (await mine('suggest', 'POST', {})).json()).error, /Nothing to suggest/);
+  await patch(copy, { author: 'Sam', upsert: [
+    { uid: 'side0001', type: 'sidetable', x: 33.5, z: 22.5 },
+    { uid: 'lamp0001', type: 'table-lamp', x: 33.5, z: 22.5, y: 2, on: 'p:side0001' },
+    { uid: 'plant001', type: 'plant', x: 25, z: 15 },
+    { uid: 'sofa0001', type: 'sofa', x: 30, z: 21, rot: 180 },
+  ], remove: ['chair001'] });
+  // The owner moves the sofa too, meanwhile.
+  await patch(owner, { upsert: [{ uid: 'sofa0001', type: 'sofa', x: 29, z: 22, rot: 180 }] });
+
+  const sent = await (await mine('suggest', 'POST', { note: 'Lamp by the window, a plant' })).json();
+  assert.deepEqual([sent.status, sent.changes, sent.note], ['open', 4, 'Lamp by the window, a plant']);
+  // Sending again updates the one suggestion.
+  await mine('suggest', 'POST', { note: 'Lamp by the window, and a plant' });
+
+  const list = (key = owner.key) => api(`api/units/${owner.id}/suggestions`, { key });
+  assert.equal((await list('x'.repeat(28))).status, 403);
+  const { suggestions } = await (await list()).json();
+  assert.equal(suggestions.length, 1);
+  const s = suggestions[0];
+  assert.deepEqual([s.author, s.title, s.note, s.changes, s.from], ['Sam', 'Home (my version)', 'Lamp by the window, and a plant', 4, copy.id]);
+  assert.ok(Array.isArray(s.base) && Array.isArray(s.items));
+
+  // Take the side table (its lamp comes with it) and the plant; not the sofa, nor the chair's removal.
+  const act = (what, body) => api(`api/units/${owner.id}/suggestions/${s.id}/${what}`, { method: 'POST', key: owner.key, body });
+  const applied = await (await act('apply', { groups: ['side0001', 'plant001'] })).json();
+  assert.equal(applied.applied, 2);
+  const at = (doc, uid) => doc.items.find((i) => i.uid === uid);
+  assert.deepEqual([at(applied.design, 'side0001').x, at(applied.design, 'lamp0001').x, at(applied.design, 'sofa0001').x], [33.5, 33.5, 29]);
+  assert.ok(at(applied.design, 'plant001') && at(applied.design, 'chair001'));
+  assert.equal((await (await list()).json()).suggestions.length, 0);
+  assert.equal((await (await mine('suggestion')).json()).status, 'applied');
+  assert.equal((await act('apply', { groups: ['side0001'] })).status, 409, 'not twice');
+
+  // Undo puts the layout back and the suggestion back in the list.
+  const undone = await (await act('undo')).json();
+  assert.equal(at(undone.design, 'side0001').x, 35.5);
+  assert.equal(at(undone.design, 'plant001'), undefined);
+  assert.equal((await (await list()).json()).suggestions.length, 1);
+
+  // Dismissed, it's gone; the copy sees that.
+  assert.equal((await act('dismiss')).status, 200);
+  assert.equal((await (await list()).json()).suggestions.length, 0);
+  assert.equal((await (await mine('suggestion')).json()).status, 'dismissed');
+
+  // A copy of the example has no one to suggest to.
+  const fromExample = await create({ from: 'example' });
+  assert.equal((await (await api(`api/units/${fromExample.id}/suggestion`, { key: fromExample.key })).json()).to, null);
+  assert.equal((await api(`api/units/${fromExample.id}/suggest`, { method: 'POST', key: fromExample.key, body: {} })).status, 400);
+});

@@ -10,10 +10,17 @@
 // one, with only the unit's link, the code unlocks the edit key. The key is
 // kept encrypted with the code (scrypt, then AES-256-GCM); the code itself is
 // never stored, and a code that decrypts the key is the right one.
+//
+// A copy can suggest its layout back to the unit it was copied from: a copy
+// remembers the layout it started from (base), so the owner sees just what it
+// changed, and what clashes with their own changes since (src/changes.js). One
+// suggestion per copy is open at a time; sending again updates it. The owner
+// previews one at a time, applies what they choose, and can undo that.
 import { createHash, timingSafeEqual, randomBytes, scrypt, createCipheriv, createDecipheriv } from 'node:crypto';
 import { promisify } from 'node:util';
 import { cleanAsset, cleanDesign, cleanItem, randomId, LIMITS } from '../src/design.js';
 import { cleanUnit, emptyUnit, buildUnit } from '../src/unit.js';
+import { layoutChanges, applyChanges } from '../src/changes.js';
 import { EXAMPLE_UNIT, EXAMPLE_TITLE } from '../src/example.js';
 import { AppError } from './http.js';
 
@@ -24,6 +31,8 @@ const SCRYPT = { N: 16384, r: 8, p: 1 };
 // Edit codes are typed on phones: case, spaces, dashes and dots don't matter.
 export const normalizeCode = (s) => String(s ?? '').normalize('NFKC').toLowerCase().replace(/[\s._-]+/g, '');
 const WRONG_CODE = 'That code doesn\'t open this unit. Its owner sets the edit code in the Share tab.';
+export const SUGGESTIONS = { open: 10, note: 200 };
+const text = (v, max) => (typeof v === 'string' ? v.replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, max) : '');
 export const ID_RE = /^[A-Za-z0-9]{8,16}$/;
 export const KEY_RE = /^[A-Za-z0-9]{20,48}$/;
 export const EXAMPLE_ID = 'example';
@@ -48,18 +57,20 @@ export class Units {
   // without furniture; '<id>' a copy of that unit with its furniture.
   create({ from, title, author } = {}) {
     if (from !== undefined && from !== null && typeof from !== 'string') throw new AppError(400, 'from must be "example" or a unit id.');
-    let doc = { unit: emptyUnit(), items: [], assets: [] }, forkedFrom = null, defaultTitle = '';
+    let doc = { unit: emptyUnit(), items: [], assets: [] }, forkedFrom = null, defaultTitle = '', base = null;
     if (from) {
       const src = this.get(from);
       doc = structuredClone(src.doc);
       forkedFrom = src.id;
       if (src.id !== EXAMPLE_ID && src.title) defaultTitle = `${src.title} (my version)`;
+      // What it starts from, so a suggestion back shows only what changed.
+      if (src.id !== EXAMPLE_ID) base = { items: src.doc.items, assets: src.doc.assets };
     }
     const clean = cleanDesign({ title: title ?? defaultTitle, author: author ?? '', unit: doc.unit, items: doc.items, assets: doc.assets });
     const id = randomId(10);
     const key = randomId(28);
     this.store.insert({
-      id, keyHash: hash(key), title: clean.title, author: clean.author, forkedFrom,
+      id, keyHash: hash(key), title: clean.title, author: clean.author, forkedFrom, base,
       doc: { unit: clean.unit, unitRev: 1, items: clean.items, assets: clean.assets },
     });
     return { row: this.get(id), key };
@@ -120,6 +131,116 @@ export class Units {
     }
     if (!this.canEdit(row, key)) throw new AppError(403, WRONG_CODE);
     return { row, key };
+  }
+
+  // ---- suggestions
+
+  // The unit a copy suggests to, or why it can't.
+  #parentOf(copy) {
+    if (!copy.forked_from || copy.forked_from === EXAMPLE_ID) throw new AppError(400, 'Only a copy of someone\'s unit can suggest changes to it. This one wasn\'t copied from one.');
+    try { return this.get(copy.forked_from); } catch { throw new AppError(400, 'The unit this was copied from is gone.'); }
+  }
+
+  #changesOf(copy, parent) {
+    const base = copy.base ? JSON.parse(copy.base) : null;
+    return layoutChanges({ base: base?.items ?? null, theirs: copy.doc.items, ours: parent.doc.items });
+  }
+
+  // Send a copy's layout to the unit it was copied from (or update the one
+  // already waiting). Returns the copy's suggestion, as mySuggestion.
+  suggest(copyId, key, { note } = {}) {
+    const copy = this.requireEdit(copyId, key);
+    const parent = this.#parentOf(copy);
+    if (!this.#changesOf(copy, parent).length) throw new AppError(400, 'Nothing to suggest yet: your version\'s furniture is the same as theirs.');
+    const base = copy.base ? JSON.parse(copy.base) : null;
+    const fields = {
+      author: copy.author, title: copy.title, note: text(note, SUGGESTIONS.note),
+      doc: { base: base?.items ?? null, items: copy.doc.items, assets: copy.doc.assets },
+    };
+    const open = this.store.latestSuggestionFrom(copy.id);
+    if (!(open?.status === 'open' && open.unit_id === parent.id && this.store.resendSuggestion(open.id, fields))) {
+      if (this.store.openSuggestions(parent.id).length >= SUGGESTIONS.open) {
+        throw new AppError(429, `${parent.title || 'That unit'} already has ${SUGGESTIONS.open} suggestions waiting. Try again once its owner has looked at them.`);
+      }
+      this.store.addSuggestion({ id: randomId(10), unitId: parent.id, fromId: copy.id, ...fields });
+    }
+    return this.mySuggestion(copyId, key);
+  }
+
+  // What a copy has suggested, for its owner: { to: { id, title, author },
+  // status: 'none' | 'open' | 'applied' | 'dismissed', note, changes (how many
+  // it would offer now), sentAt }. `to` is null when it can't suggest.
+  mySuggestion(copyId, key) {
+    const copy = this.requireEdit(copyId, key);
+    let parent;
+    try { parent = this.#parentOf(copy); } catch { return { to: null, status: 'none', changes: 0 }; }
+    const s = this.store.latestSuggestionFrom(copy.id);
+    return {
+      to: { id: parent.id, title: parent.title, author: parent.author },
+      status: s?.unit_id === parent.id ? s.status : 'none',
+      note: s?.note ?? '', sentAt: s?.updated_at ?? null,
+      changes: this.#changesOf(copy, parent).length,
+    };
+  }
+
+  withdraw(copyId, key) {
+    const copy = this.requireEdit(copyId, key);
+    const s = this.store.latestSuggestionFrom(copy.id);
+    if (s?.status === 'open') this.store.dropSuggestion(s.id);
+    return this.mySuggestion(copyId, key);
+  }
+
+  // The suggestions waiting for a unit, for its owner to preview: each with
+  // its layout and base, so the browser shows the same changes the server applies.
+  suggestions(id, key) {
+    const row = this.requireEdit(id, key);
+    return this.store.openSuggestions(row.id).map((s) => ({
+      id: s.id, from: s.from_id, author: s.author, title: s.title, note: s.note, createdAt: s.created_at, updatedAt: s.updated_at,
+      base: s.doc.base, items: s.doc.items, assets: s.doc.assets,
+      changes: layoutChanges({ base: s.doc.base, theirs: s.doc.items, ours: row.doc.items }).length,
+    }));
+  }
+
+  #open(row, sid) {
+    const s = this.store.suggestion(sid);
+    if (!s || s.unit_id !== row.id) throw new AppError(404, 'There is no such suggestion for this unit.');
+    return s;
+  }
+
+  // Take the chosen changes (group ids, or 'all') into the unit. Returns { row, applied }.
+  applySuggestion(id, key, sid, select = 'all') {
+    if (select !== 'all' && (!Array.isArray(select) || !select.length || !select.every((g) => typeof g === 'string'))) throw new AppError(400, 'Choose at least one change to apply.');
+    const s = this.#open(this.requireEdit(id, key), sid);
+    if (s.status !== 'open') throw new AppError(409, 'That suggestion was already applied or dismissed.');
+    let before, applied;
+    const { row } = this.mutate(id, key, (doc) => {
+      before = { items: doc.items, assets: doc.assets };
+      const out = applyChanges({ base: s.doc.base, theirs: s.doc.items, ours: doc.items, theirAssets: s.doc.assets, ourAssets: doc.assets, select });
+      if (!out.applied) throw new AppError(409, 'Those changes are already in your layout, or no longer apply.');
+      if (out.assets.length > LIMITS.assets) throw new AppError(400, `A unit holds at most ${LIMITS.assets} custom pieces.`);
+      ({ applied } = out);
+      doc.items = out.items;
+      doc.assets = out.assets;
+    });
+    this.store.closeSuggestion(s.id, 'applied', { before, version: row.version });
+    return { row, applied };
+  }
+
+  dismissSuggestion(id, key, sid) {
+    const s = this.#open(this.requireEdit(id, key), sid);
+    if (s.status === 'open') this.store.closeSuggestion(s.id, 'dismissed');
+  }
+
+  // Put the layout back as it was before a suggestion was applied, and the
+  // suggestion back in the list, if nothing has changed since.
+  undoSuggestion(id, key, sid) {
+    const row0 = this.requireEdit(id, key);
+    const s = this.#open(row0, sid);
+    if (s.status !== 'applied' || !s.before) throw new AppError(409, 'There is nothing to undo.');
+    if (row0.version !== s.applied_version) throw new AppError(409, 'The layout has changed since, so this can\'t be undone in one go.');
+    const { row } = this.mutate(id, key, (doc) => { doc.items = s.before.items; doc.assets = s.before.assets; });
+    this.store.closeSuggestion(s.id, 'open');
+    return { row };
   }
 
   requireEdit(id, key) {
