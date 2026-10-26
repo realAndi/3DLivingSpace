@@ -4,19 +4,26 @@
 //
 // Placed items are in feet: x and z are the footprint's center (x east, z
 // south, in the unit's own coordinates), w/d/h are width, depth and height,
-// rot is degrees clockwise on the plan with 0 facing south.
+// rot is degrees clockwise on the plan with 0 facing south. Pieces off the
+// floor also have y, how far their underside is above the floor, and `on`,
+// what holds them up: 'wall', 'ceiling', 'p:<uid>' (a placed piece's top or
+// shelf) or 'f:<fixture id>' (a counter or another built-in). Both are left
+// out for a piece standing on the floor.
 //
 // Assets are custom 3D pieces built from primitives, usually by an AI through
 // the MCP server. Their parts are in inches, in the piece's own frame: origin
 // at the center of its footprint on the floor, +x to the piece's right as you
-// face it, +y up, +z toward its front.
+// face it, +y up, +z toward its front. An asset says where it goes and what
+// it is (`place` and `kind`, as in src/catalog.js), and a lamp says where its
+// bulb is (`light`, inches in the same frame), which makes it switch on and off.
 
-import { catalogByType, swatchKeys } from './catalog.js';
+import { catalogByType, swatchKeys, PLACES, KINDS } from './catalog.js';
 import { cleanUnit } from './unit.js';
 
 export const LIMITS = { items: 150, assets: 40, parts: 120, title: 60, author: 40, name: 40, description: 200, partInches: 240 };
 export const SHAPES = ['box', 'cylinder', 'cone', 'sphere'];
-export const FINISHES = ['matte', 'satin', 'gloss', 'metal', 'glass', 'fabric', 'wood'];
+// glow: a lamp's shade or bulb, lit while the lamp is on.
+export const FINISHES = ['matte', 'satin', 'gloss', 'metal', 'glass', 'fabric', 'wood', 'glow'];
 
 const ALPHABET = '23456789abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ';
 export function randomId(length = 10) {
@@ -87,17 +94,27 @@ export function cleanAsset(raw) {
   }
   const shift = [(lo[0] + hi[0]) / 2, lo[1], (lo[2] + hi[2]) / 2];
   for (const p of parts) p.at = p.at.map((v, i) => r3(v - shift[i]));
-  return {
+  const out = {
     id: uidOk(raw.id) ? raw.id : randomId(8),
     name: text(raw.name, LIMITS.name) || 'Custom piece',
     description: text(raw.description, LIMITS.description),
     parts,
     // Size in inches, as built.
     w: r3(hi[0] - lo[0]), h: r3(hi[1] - lo[1]), d: r3(hi[2] - lo[2]),
+    place: PLACES.includes(raw.place) ? raw.place : 'floor',
+    kind: KINDS.some((k) => k.key === raw.kind) ? raw.kind : 'furniture',
   };
+  // The bulb, moved with the parts and kept inside the piece.
+  if (Array.isArray(raw.light) && raw.light.length === 3 && raw.light.every((v) => Number.isFinite(+v))) {
+    out.light = raw.light.map((v, i) => r3(Math.min(i === 1 ? hi[1] - lo[1] : (hi[i] - lo[i]) / 2, Math.max(i === 1 ? 0 : -(hi[i] - lo[i]) / 2, +v - shift[i]))));
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------- items
+const ON = /^(wall|ceiling|p:[A-Za-z0-9_-]{4,24}|f:[A-Za-z0-9][A-Za-z0-9_-]{0,23})$/;
+export const cleanOn = (v) => (typeof v === 'string' && ON.test(v) ? v : null);
+
 export function cleanItem(raw, assets = {}) {
   if (!raw) return null;
   const asset = raw.type === 'asset' ? assets[raw.asset] : null;
@@ -114,7 +131,29 @@ export function cleanItem(raw, assets = {}) {
     color: cleanColor(raw.color),
   };
   if (asset) item.asset = asset.id;
+  const y = r3(num(raw.y, 0, 19, 0));
+  if (y > 0) item.y = y;
+  const on = cleanOn(raw.on);
+  if (on && on !== `p:${item.uid}`) item.on = on;
   return item;
+}
+
+// Keep `on` pointing at something that exists, with no piece resting on
+// itself through others; a piece whose support is gone keeps its height.
+function cleanSupports(items, unit) {
+  const byUid = new Map(items.map((i) => [i.uid, i]));
+  const fixtures = new Set((unit?.fixtures ?? []).map((f) => f.id));
+  for (const item of items) {
+    if (!item.on) continue;
+    if (item.on.startsWith('f:') && !fixtures.has(item.on.slice(2))) delete item.on;
+    else if (item.on.startsWith('p:')) {
+      const seen = new Set([item.uid]);
+      let at = byUid.get(item.on.slice(2));
+      while (at && !seen.has(at.uid)) { seen.add(at.uid); at = at.on?.startsWith('p:') ? byUid.get(at.on.slice(2)) : null; }
+      if (!byUid.has(item.on.slice(2)) || at) delete item.on;
+    }
+  }
+  return items;
 }
 
 // A whole design document: { title, author, unit, items, assets }.
@@ -132,5 +171,6 @@ export function cleanDesign(raw = {}) {
     seen.add(clean.uid);
     items.push(clean);
   }
-  return { title: text(raw.title, LIMITS.title), author: text(raw.author, LIMITS.author), unit: cleanUnit(raw.unit ?? {}).unit, items, assets: Object.values(assets) };
+  const unit = cleanUnit(raw.unit ?? {}).unit;
+  return { title: text(raw.title, LIMITS.title), author: text(raw.author, LIMITS.author), unit, items: cleanSupports(items, unit), assets: Object.values(assets) };
 }

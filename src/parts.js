@@ -264,12 +264,12 @@ export function localParts(item, assets = null) {
 // Turned and placed.
 
 // Outlines turned by rot (degrees clockwise on the plan), relative to the
-// center, as footprint() in src/catalog.js turns them.
-function turn(parts, rot) {
+// center, as footprint() in src/catalog.js turns them, and lifted by y.
+function turn(parts, rot, y = 0) {
   const a = (-rot * Math.PI) / 180, c = Math.cos(a), s = Math.sin(a);
   const out = parts.map((p) => {
     const pts = p.poly.map(([lx, lz]) => [lx * c + lz * s, -lx * s + lz * c]);
-    return { pts, box: boxOf(pts), y0: p.y0, y1: p.y1, thin: thinOf(p.poly) };
+    return { pts, box: boxOf(pts), y0: p.y0 + y, y1: p.y1 + y, thin: thinOf(p.poly) };
   });
   const box = [Infinity, Infinity, -Infinity, -Infinity];
   for (const p of out) { box[0] = Math.min(box[0], p.box[0]); box[1] = Math.min(box[1], p.box[1]); box[2] = Math.max(box[2], p.box[2]); box[3] = Math.max(box[3], p.box[3]); }
@@ -291,20 +291,22 @@ const thinOf = (poly) => { const b = boxOf(poly); return Math.min(b[2] - b[0], b
 const catalogBodies = new Map();
 const assetBodies = new WeakMap();
 
-// A piece's parts turned to its rotation, relative to its center:
-// { parts: [{ pts, box, y0, y1 }], box, y0, y1, thin }. Move it by adding (x, z).
+// A piece's parts turned to its rotation, relative to its center, at its
+// height off the floor (y): { parts: [{ pts, box, y0, y1 }], box, y0, y1,
+// thin }. Move it by adding (x, z).
 export function pieceBody(item, assets = null) {
-  const key = `${item.type}|${item.w}|${item.d}|${item.h}|${item.rot}`;
+  const y = item.y ?? 0;
+  const key = `${item.type}|${item.w}|${item.d}|${item.h}|${item.rot}|${y}`;
   const asset = assetOf(item, assets);
   let cache = catalogBodies;
   if (asset) {
     if (!assetBodies.has(asset)) assetBodies.set(asset, new Map());
     cache = assetBodies.get(asset);
-  } else if (item.type === 'asset') return turn(localParts(item), item.rot);
+  } else if (item.type === 'asset') return turn(localParts(item), item.rot, y);
   let body = cache.get(key);
   if (!body) {
     if (cache.size > 2000) cache.clear();
-    body = turn(localParts(item, assets), item.rot);
+    body = turn(localParts(item, assets), item.rot, y);
     cache.set(key, body);
   }
   return body;
@@ -512,4 +514,131 @@ export function fixtureParts(f, ceiling = 9) {
   else if (FIXTURES[f.type]) FIXTURES[f.type](P, f, ceiling);
   if (!P.list.length) P.box(-f.w / 2, 0, f.w / 2, f.d, 0, f.h);
   return placeBody(turn(P.list, f.rot), f.x, f.z);
+}
+
+// ---------------------------------------------------------------------------
+// Surfaces: the flat tops and shelves other things can rest on (a lamp on a
+// side table, books on a shelf, a coffee maker on the counter). Each is an
+// outline at a height y, with `clear`, the room above it before the next
+// shelf (Infinity for a top). Like parts, they follow the builders, in the
+// same frame; a piece resting on one stands exactly at its y, so it touches
+// the part under it without overlapping it.
+
+class Surfaces extends Parts {
+  // A flat rectangle at y (corners in any order, as Parts.box).
+  top(s0, t0, s1, t1, y, clear = Infinity) {
+    const a = Math.min(s0, s1), b = Math.max(s0, s1), c = Math.min(t0, t1) - this.d / 2, e = Math.max(t0, t1) - this.d / 2;
+    if (b - a > 1e-6 && e - c > 1e-6) this.list.push({ poly: [[a, c], [b, c], [b, e], [a, e]], y, clear });
+    return this;
+  }
+  oval(s, t, rs, rt, y, clear = Infinity) {
+    this.list.push({ poly: ring(s, t - this.d / 2, rs, rt, ROUND), y, clear });
+    return this;
+  }
+}
+
+const SURFACES = {
+  ottoman(S, w, d, h) { S.top(-w / 2, 0, w / 2, d, h); },
+  coffeetable(S, w, d, h) {
+    S.top(-w / 2, 0, w / 2, d, h);
+    S.top(-w / 2 + 0.1, 0.1, w / 2 - 0.1, d - 0.1, 0.4, h - 0.5);
+  },
+  sidetable(S, w, d, h) { S.top(-w / 2, 0, w / 2, d, h); },
+  tvstand(S, w, d, h) { S.top(-w / 2, 0, w / 2, d - 0.03, h); },
+  // The top and every shelf, as the builder spaces them.
+  bookshelf(S, w, d, h) {
+    const th = 0.06, n = Math.max(2, Math.round(h / 1.15)), at = (k) => 0.15 + (k * (h - 0.15 - th)) / n;
+    for (let k = 0; k < n; k++) S.top(-w / 2 + th, 0.03, w / 2 - th, d, at(k) + th, at(k + 1) - at(k) - th);
+    S.top(-w / 2, 0, w / 2, d, h);
+  },
+  table(S, w, d, h) { S.top(-w / 2, 0, w / 2, d, h); },
+  roundtable(S, w, d, h) { S.oval(0, d / 2, w / 2, d / 2, h); },
+  bench(S, w, d, h) { S.top(-w / 2, 0, w / 2, d, h); },
+  nightstand(S, w, d, h) { S.top(-w / 2, 0, w / 2, d - 0.03, h); },
+  dresser(S, w, d, h) { S.top(-w / 2, 0, w / 2, d - 0.06, h); },
+  desk(S, w, d, h) { S.top(-w / 2, 0, w / 2, d, h); },
+  box(S, w, d, h) { S.top(-w / 2, 0, w / 2, d, h); },
+};
+
+// Custom assets: the top of every upright box or round part at least 5" across.
+function assetSurfaces(asset, w, d, h) {
+  const kx = w / asset.w, ky = h / asset.h, kz = d / asset.d, out = [];
+  for (const p of asset.parts) {
+    if (p.shape === 'cone' || Math.abs(p.rot[0]) > 0.5 || Math.abs(p.rot[2]) > 0.5) continue;
+    const [sx, sy, sz] = p.size;
+    if (sx < 5 || sz < 5) continue;
+    const top = (p.at[1] + sy / 2) * ky;
+    const m = rotation([0, p.rot[1], 0]);
+    const pts = p.shape === 'box'
+      ? [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([a, b]) => [a * sx / 2, b * sz / 2])
+      : ring(0, 0, sx / 2, sz / 2, ROUND);
+    out.push({ poly: pts.map(([x, z]) => [(m[0][0] * x + m[0][2] * z + p.at[0]) * kx, (m[2][0] * x + m[2][2] * z + p.at[2]) * kz]), y: top, clear: Infinity });
+  }
+  return out;
+}
+
+// Can things rest on this type of piece?
+export const holdsItems = (type) => !!SURFACES[catalogByType[type]?.build ?? catalogByType[type]?.type] || type === 'asset';
+
+function placeSurfaces(list, rot, x, z, y = 0) {
+  const a = (-rot * Math.PI) / 180, c = Math.cos(a), s = Math.sin(a);
+  return list.map((p) => {
+    const poly = p.poly.map(([lx, lz]) => [x + lx * c + lz * s, z - lx * s + lz * c]);
+    return { poly, aabb: boxOf(poly), y: p.y + y, clear: p.clear };
+  });
+}
+
+// A placed piece's surfaces in plan coordinates: [{ poly, aabb, y, clear }],
+// highest last. Pieces nothing can rest on have none.
+export function pieceSurfaces(item, assets = null) {
+  const { w, d, h } = item;
+  const asset = assetOf(item, assets);
+  let list = [];
+  if (asset) list = assetSurfaces(asset, w, d, h);
+  else {
+    const def = catalogByType[item.type];
+    const make = SURFACES[def?.build ?? def?.type];
+    if (make) { const S = new Surfaces(d); make(S, w, d, h, def); list = S.list; }
+  }
+  return placeSurfaces(list, item.rot, item.x, item.z, item.y ?? 0).sort((p, q) => p.y - q.y);
+}
+
+// Built-ins' tops: kitchen counters (where there is counter), islands, bar
+// counters, vanities, built-in cabinets, laundry machines, a mantel.
+const FIXTURE_SURFACES = {
+  island(S, f) { S.top(-f.w / 2, 0, f.w / 2, f.d, f.h); },
+  counter(S, f) { S.top(-f.w / 2, 0, f.w / 2, f.d, f.h); },
+  vanity(S, f) { S.top(-f.w / 2, 0, f.w / 2, f.d, f.h); },
+  'built-in'(S, f) { S.top(-f.w / 2, 0, f.w / 2, f.d, f.h); },
+  shelves(S, f) { S.top(-f.w / 2, 0, f.w / 2, f.d, f.h); },
+  radiator(S, f) { S.top(-f.w / 2, 0, f.w / 2, f.d, f.h); },
+  washer(S, f) { S.top(-f.w / 2, 0, f.w / 2, f.d, f.h); },
+  dryer(S, f) { S.top(-f.w / 2, 0, f.w / 2, f.d, f.h); },
+  'washer-dryer'(S, f) { S.top(-f.w / 2, 0, f.w / 2, f.d, f.h); },
+  fireplace(S, f) { if (f.opts?.mantel !== false) S.top(-f.w / 2 - 0.12, 0, f.w / 2 + 0.12, f.d + 0.18, f.h); },
+};
+
+// The counter of a kitchen run, one stretch per run of counter segments.
+function counterSurfaces(S, f) {
+  const segs = f.segments ?? [{ kind: 'base', s0: -f.w / 2, s1: f.w / 2 }], n = segs.length;
+  const ct = f.type === 'fridge' || f.type === 'pantry' ? null : f.h;
+  if (ct === null) return;
+  const kind = (i) => segs[i]?.kind;
+  const tallEnd = (i) => kind(i) === 'end' && (TALL.has(kind(i - 1)) || TALL.has(kind(i + 1)));
+  const counter = (i) => COUNTER.has(kind(i)) || (kind(i) === 'end' && !tallEnd(i));
+  for (let i = 0; i < n; i++) {
+    if (!counter(i)) continue;
+    let j = i;
+    while (j + 1 < n && counter(j + 1)) j++;
+    S.top(segs[i].s0, 0, segs[j].s1, f.d, ct);
+    i = j;
+  }
+}
+
+// A built fixture's surfaces in plan coordinates, as pieceSurfaces.
+export function fixtureSurfaces(f) {
+  const S = new Surfaces(f.d);
+  if (KITCHEN.has(f.type)) counterSurfaces(S, f);
+  else FIXTURE_SURFACES[f.type]?.(S, f);
+  return placeSurfaces(S.list, f.rot, f.x, f.z).sort((p, q) => p.y - q.y);
 }

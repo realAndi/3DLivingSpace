@@ -244,7 +244,7 @@ const BUILDERS = {
 };
 
 // One placed piece, as a group positioned and turned in the room.
-// item: { id, type, name, w, d, h (feet), x, z (center, feet), rot (degrees clockwise on the plan), color }
+// item: { uid, type, name, w, d, h (feet), x, z (center, feet), y (underside above the floor, feet), rot (degrees clockwise on the plan), color }
 export function buildPiece(M, item, assets = {}) {
   const B = new Batch(`piece-${item.uid}`);
   const asset = item.type === 'asset' ? assets[item.asset] : null;
@@ -252,10 +252,10 @@ export function buildPiece(M, item, assets = {}) {
   else {
     const def = catalogByType[item.type] ?? catalogByType.box;
     const F = new Frame(0, -item.d / 2, [1, 0], [0, 1]);
-    BUILDERS[def.build ?? def.type](B, M, F, item.w, item.d, item.h, swatchMaterial(M, item.color), { tv: def.tv });
+    (BUILDERS[def.build ?? def.type] ?? BUILDERS.box)(B, M, F, item.w, item.d, item.h, swatchMaterial(M, item.color), { tv: def.tv });
   }
   const g = B.build();
-  g.position.set(item.x, 0, item.z);
+  g.position.set(item.x, item.y ?? 0, item.z);
   g.rotation.y = -THREE.MathUtils.degToRad(item.rot);
   g.traverse((o) => { if (o.isMesh) o.userData.pieceId = item.uid; });
   g.userData.pieceId = item.uid;

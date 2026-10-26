@@ -9,7 +9,9 @@ import { fmtLen, fmtSize, fmtRug, toInput, fromInput, inputUnit, getUnits } from
 // is selected, lines show its clearance to the nearest wall, counter or other
 // piece on each side, and the editor says what is wrong with where it sits.
 // Every change goes out through onOps as pieces added, changed or removed; the
-// unit session saves them. Units that aren't yours open read-only.
+// unit session saves them. Units that aren't yours open read-only. onMount(item,
+// group) and onUnmount(uid) tell the rest of the scene (lights, things you can
+// switch or open) when a piece's 3D model comes and goes.
 //
 // `U` is the built unit (src/unit.js): walls and fixtures to keep clear of,
 // and where the floor is. setUnit() swaps it when the unit is rebuilt.
@@ -181,7 +183,7 @@ export class LayoutEditor {
     if (rebuild) this.#mount(item);
     else {
       const g = this.groups.get(uid);
-      g.position.set(item.x, 0, item.z);
+      g.position.set(item.x, item.y ?? 0, item.z);
       g.rotation.y = -THREE.MathUtils.degToRad(item.rot);
     }
     this.#refreshSelection();
@@ -250,6 +252,7 @@ export class LayoutEditor {
     const g = buildPiece(this.M, item, this.assets);
     this.root.add(g);
     this.groups.set(item.uid, g);
+    this.onMount?.(item, g);
     if (item.uid === this.selected) this.#refreshSelection();
     this.invalidate();
   }
@@ -257,6 +260,7 @@ export class LayoutEditor {
   #unmount(uid) {
     const g = this.groups.get(uid);
     if (!g) return;
+    this.onUnmount?.(uid);
     this.root.remove(g);
     g.traverse((o) => { if (o.isMesh) o.geometry.dispose(); });
     this.groups.delete(uid);
@@ -481,7 +485,7 @@ export class LayoutEditor {
       this.#snapToWalls(next);
       if (drag.blockers && collides(next, drag.blockers, this.assets)) Object.assign(next, before);
       item.x = next.x; item.z = next.z;
-      this.groups.get(item.uid).position.set(item.x, 0, item.z);
+      this.groups.get(item.uid).position.set(item.x, item.y ?? 0, item.z);
       this.#updateGuides();
       this.#renderBar();
     }, { capture: true });

@@ -17,7 +17,9 @@
 //
 // Axes: x east (plan right), z south (plan down), y up. Rotations are degrees
 // clockwise on the plan, and 0 means a fixture's front faces south (+z), the
-// same as furniture. Compass yaw: 0 north, 90 east.
+// same as furniture. Compass yaw: 0 north, 90 east. Those are plan
+// directions; `north` says where true north is, in degrees clockwise from the
+// top of the plan, for the sun.
 
 import { pointInPoly, polygonArea, polyBounds, labelPoint, orientedRect, frontOf, rightOf, parseFeetInches } from './geometry.js';
 
@@ -302,6 +304,9 @@ export function cleanUnit(raw = {}) {
   u.windowHead = r4(num(raw.windowHead, u.windowSill + 0.5, u.ceiling, Math.min(DEFAULTS.windowHead, u.ceiling)));
   u.exteriorWall = r4(num(raw.exteriorWall, 2 / 12, 2.5, DEFAULTS.exteriorWall));
   u.level = Math.round(num(raw.level, 1, 80, DEFAULTS.level));
+  // Left out when the top of the plan is north, so older units stay as they were.
+  const north = r4((((num(raw.north, -3600, 3600, 0)) % 360) + 360) % 360);
+  if (north) u.north = north;
   const f = raw.finishes ?? {};
   u.finishes = {
     walls: color(f.walls) ?? DEFAULT_FINISHES.walls,
@@ -378,7 +383,7 @@ export const fromInches = {
   // Unit-wide settings (heights, finishes, name); lists are handled one by one.
   settings: (s = {}) => drop({
     name: s.name, beds: s.beds, baths: s.baths, sqft: s.sqft, ceiling: ftOf(s.ceiling_height), doorHeight: ftOf(s.door_height),
-    windowSill: ftOf(s.window_sill), windowHead: ftOf(s.window_head), exteriorWall: ftOf(s.exterior_wall), level: s.floor_level, finishes: s.finishes,
+    windowSill: ftOf(s.window_sill), windowHead: ftOf(s.window_head), exteriorWall: ftOf(s.exterior_wall), level: s.floor_level, north: s.north, finishes: s.finishes,
   }),
 };
 
@@ -391,7 +396,7 @@ export const toInches = {
   opening: (o) => drop({ id: o.id, type: o.type, at: ptIn(o.at), width: inch(o.width), name: o.name, head_height: o.head ? inch(o.head) : undefined, sill_height: o.sill !== undefined ? inch(o.sill) : undefined, hinge: o.hinge, opens: o.opens, open_angle: o.open, panes: o.panes, mullions: o.mullions, transom_height: o.transom ? inch(o.transom) : undefined }),
   fixture: (f) => drop({ id: f.id, type: f.type, name: f.name, at: [inch(f.x), inch(f.z)], width: inch(f.w), depth: inch(f.d), height: inch(f.h), rotation: f.rot, color: f.color, ...optsToInches(f.type, f.opts) }),
   label: (l) => ({ text: l.text, at: ptIn(l.at) }),
-  settings: (u) => drop({ name: u.name, beds: u.beds, baths: u.baths, sqft: u.sqft, ceiling_height: inch(u.ceiling), door_height: inch(u.doorHeight), window_sill: inch(u.windowSill), window_head: inch(u.windowHead), exterior_wall: inch(u.exteriorWall), floor_level: u.level, finishes: u.finishes }),
+  settings: (u) => drop({ name: u.name, beds: u.beds, baths: u.baths, sqft: u.sqft, ceiling_height: inch(u.ceiling), door_height: inch(u.doorHeight), window_sill: inch(u.windowSill), window_head: inch(u.windowHead), exterior_wall: inch(u.exteriorWall), floor_level: u.level, north: u.north ?? 0, finishes: u.finishes }),
 };
 
 // ---------------------------------------------------------------------------
@@ -941,7 +946,7 @@ export function buildUnit(spec, { checks = true } = {}) {
   })();
 
   return {
-    spec: u, empty: !rooms.length, heights: H, finishes: u.finishes, level: u.level,
+    spec: u, empty: !rooms.length, heights: H, finishes: u.finishes, level: u.level, north: u.north ?? 0,
     rooms, roomById, labels: u.labels, edges, openings, fixtures,
     lights, views, start, bounds, planImage: u.planImage,
     area: indoor.reduce((a, r) => a + r.area, 0),
@@ -949,7 +954,7 @@ export function buildUnit(spec, { checks = true } = {}) {
     wallBoxes, wallRects,
     // Furniture can't overlap these (axis-aligned [x0, z0, x1, z1]).
     obstacles: [...wallRects, ...fixtures.filter((f) => f.blocks).map((f) => f.aabb)],
-    doorSwings: openings.filter((o) => o.swingPoly).map((o) => ({ id: o.id, name: o.name, poly: o.swingPoly })),
+    doorSwings: openings.filter((o) => o.swingPoly).map((o) => ({ id: o.id, name: o.name, poly: o.swingPoly, head: o.head })),
     problems,
     cellAt, center,
     roomAt: cellRoom,
