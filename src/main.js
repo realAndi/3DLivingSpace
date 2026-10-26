@@ -157,7 +157,16 @@ plan.mouseButtons = { LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: T
 plan.touches = { ONE: THREE.TOUCH.PAN, TWO: THREE.TOUCH.DOLLY_PAN };
 plan.target.copy(CENTER);
 
-for (const c of [doll, plan]) c.addEventListener('change', () => invalidate());
+doll.addEventListener('change', () => invalidate());
+// Plan turned east-up (a phone held upright) makes OrbitControls report a
+// change on every update though nothing moves; Plan renders when its camera
+// really did (see planMoved), so an idle plan stops drawing.
+const planWas = { p: new THREE.Vector3(), q: new THREE.Quaternion(), zoom: 0 };
+function planMoved() {
+  const moved = planWas.p.distanceToSquared(planCam.position) > 1e-10 || 1 - Math.abs(planWas.q.dot(planCam.quaternion)) > 1e-10 || Math.abs(planWas.zoom - planCam.zoom) > 1e-7;
+  planWas.p.copy(planCam.position); planWas.q.copy(planCam.quaternion); planWas.zoom = planCam.zoom;
+  return moved;
+}
 
 // Framing follows the unit's size: where it sits, how far the cameras stand
 // back and how far Plan zooms in. (The sun's shadow camera: lighting.setUnit.)
@@ -1240,7 +1249,7 @@ function frame(now = performance.now()) {
   let changed = needsRender;
   changed = stepOrbitTween(dt) || changed;
   if (mode === 'dollhouse') changed = doll.update() || changed;
-  else if (mode === 'plan') changed = plan.update() || changed;
+  else if (mode === 'plan') { plan.update(); changed = planMoved() || changed; }
   else changed = walk.update(dt) || changed;
   changed = animateDoors(dt) || changed;
   changed = stepHighlight(dt) || changed;
