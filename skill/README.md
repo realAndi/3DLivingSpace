@@ -12,11 +12,9 @@ From the [latest release](https://github.com/realAndi/3DLivingSpace/releases/lat
 - **claude.ai, the Claude desktop app and Cowork:** download
   `3d-living-space-plugin.zip`, then Customize, Plugins, Add, Upload plugin. It
   then also appears in Claude Code signed in to the same account.
-- **Claude Code** (the terminal, or the desktop app's Code tab):
-  ```
-  /plugin marketplace add https://github.com/realAndi/3DLivingSpace/releases/latest/download/marketplace.json
-  /plugin install 3d-living-space@3dlivingspace
-  ```
+- **Claude Code** (the terminal, or the desktop app's Code tab): the release
+  notes give the one `/plugin install 3d-living-space --marketplace …` line that
+  adds this repository's marketplace and installs the plugin from it.
 - **The skill alone:** `3d-living-space.zip` goes in Customize, Skills on
   claude.ai, or unzipped into `~/.claude/skills/` for Claude Code.
 

@@ -11,8 +11,8 @@
       "description": "Build a to-scale 3D model of your apartment from its floor plan and photos, furnish it, and share it as a live page on claude.ai that you walk through on your phone or computer.",
       "source": {
         "source": "archive",
-        "url": "https://github.com/realAndi/3DLivingSpace/releases/download/skill-v1.0.0/3d-living-space-plugin.zip",
-        "sha256": "b4bb05b5da15fae9fb35c77bf9e7b6063e8c6ce8589c2937b7998275968a3a9e"
+        "url": "https://github.com/realAndi/3DLivingSpace/releases/download/skill-v1.0.1/3d-living-space-plugin.zip",
+        "sha256": "7673bd5725f86921f93954d45980073d6b623ac57a156cdf57458e4295b82013"
       }
     }
   ]

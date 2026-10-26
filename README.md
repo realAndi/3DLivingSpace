@@ -120,9 +120,11 @@ carries the skill as a plugin, which every Claude app installs, and on its own:
   draws the unit the same way and hands over the page as one HTML file
   (`bundle --single`) to download and open. The live, shareable page needs Claude
   Code (or the desktop app's Code tab).
-- **Claude Code:** `/plugin marketplace add https://github.com/realAndi/3DLivingSpace/releases/latest/download/marketplace.json`,
-  then `/plugin install 3d-living-space@3dlivingspace`; or unzip either zip into
-  `~/.claude/skills/`. Then attach a floor plan and ask Claude to build it in 3D.
+- **Claude Code:** `/plugin install 3d-living-space --marketplace realAndi/3DLivingSpace`
+  (until this branch is merged, `realAndi/3DLivingSpace#artifact-skill`), which
+  adds this repository's marketplace and installs the plugin from it; or unzip
+  either zip into `~/.claude/skills/`. Then attach a floor plan and ask Claude to
+  build it in 3D.
 - **The skill alone:** `3d-living-space.zip`, for Customize, Skills on claude.ai.
 
 Nothing needs installing where it runs but Node 18 or later: the zips carry the
@@ -138,7 +140,10 @@ gh release create skill-v<version> dist/3d-living-space-plugin.zip dist/3d-livin
 ```
 
 The marketplace's one entry is the plugin zip of that release, pinned by its
-sha256, so upload exactly the files that build wrote.
+sha256, so upload exactly the files that build wrote. Claude Code reads the
+catalog from the repository (`realAndi/3DLivingSpace`, or a branch or tag after
+`#`), never from a github.com download link: it takes any github.com URL for a
+git repository to clone.
 
 **The scripts.** `node scripts/space.mjs <command>`, over a work folder that holds
 the unit between calls:
