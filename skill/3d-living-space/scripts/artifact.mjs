@@ -14,13 +14,13 @@
 // skill leaves them alone. A write to a document that exists needs the version
 // last read (if_version), and ArtifactData shows versions only in its text
 // result, so pull reads them from that text.
-import { readFileSync, existsSync, readdirSync, statSync, rmSync, mkdirSync, copyFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, readdirSync, statSync, rmSync, mkdirSync, copyFileSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { ToolError } from '../../../src/agent.js';
 import { cleanDesign } from '../../../src/design.js';
-import { assembleApp } from './app.mjs';
+import { assembleApp, pageTitle } from './app.mjs';
 import { writeAtomic, newDoc } from './workdir.mjs';
 
 export const RULES = [
@@ -74,13 +74,16 @@ function filesUnder(dir, prefix = '') {
   }).sort();
 }
 
-function writeApp(out) {
-  if (!isPackaged()) return assembleApp(REPO, out);
+// The page is named for the unit (the gallery shows its <title>).
+function writeApp(out, title) {
+  if (!isPackaged()) return assembleApp(REPO, out, { title });
   const files = filesUnder(PACKAGED_APP);
   for (const rel of files) {
     mkdirSync(dirname(join(out, rel)), { recursive: true });
     copyFileSync(join(PACKAGED_APP, rel), join(out, rel));
   }
+  const page = join(out, 'index.html');
+  writeFileSync(page, readFileSync(page, 'utf8').replace(/<title>[^<]*<\/title>/, () => pageTitle(title)));
   return files;
 }
 
@@ -94,7 +97,7 @@ export function bundle(work, { out = work.path('artifact'), snapshotOnly = false
   const doc = work.load();
   const url = work.url;
   if (snapshotOnly && !url) throw new ToolError('--snapshot-only replaces the unit.json of an Artifact already published: pass --url <its URL>, or bundle without it to publish the whole app.');
-  const files = snapshotOnly ? [] : writeApp(out).filter((f) => f !== 'index.html');
+  const files = snapshotOnly ? [] : writeApp(out, doc.title || doc.unit.name).filter((f) => f !== 'index.html');
   writeAtomic(join(out, 'unit.json'), JSON.stringify(snapshotOf(doc)));
   files.push('unit.json');
   const bytes = [...files, ...(snapshotOnly ? [] : ['index.html'])].reduce((n, f) => n + statSync(join(out, f)).size, 0);
