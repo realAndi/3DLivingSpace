@@ -99,7 +99,7 @@ function skyDome() {
       void main(){ vec3 d = normalize(vDir); float h = d.y;
         vec3 c = h > 0.0 ? mix(horizon, top, pow(h, 0.55)) : mix(horizon, ground, min(1.0, -h * 6.0));
         float s = max(dot(d, sunDir), 0.0), up = step(-0.01, h);
-        c += sunColor * sunAmt * up * (0.18 * pow(s, 10.0) + 0.45 * pow(s, 160.0) + 2.0 * smoothstep(0.99985, 0.99992, s));
+        c += sunColor * sunAmt * up * (0.12 * pow(s, 24.0) + 0.45 * pow(s, 200.0) + 2.0 * smoothstep(0.99985, 0.99992, s));
         float m = max(dot(d, moonDir), 0.0);
         c += vec3(0.2, 0.24, 0.32) * moonAmt * up * 0.18 * pow(m, 30.0);
         c = mix(c, vec3(0.82, 0.84, 0.88), moonAmt * up * smoothstep(0.99978, 0.99986, m));

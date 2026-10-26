@@ -25,8 +25,8 @@ import { setOutdoor } from './surroundings.js';
 
 const DEG = Math.PI / 180;
 const LAT = 40 * DEG;            // no location: a mid-latitude city
-const WARM = 0xffdcb0;           // indoor bulbs
-const CAN_CD = 110;              // one can, in the pool's units (feet, decay 2)
+const WARM = 0xffdfb8;           // indoor bulbs
+const CAN_CD = 100;              // one can, in the pool's units (feet, decay 2)
 const LAMP_CD = 70;              // one 60 W-equivalent lamp (C1 power 1)
 const PLATE_Y = 4;               // switch plates' centers, 48" up
 const SWINGS = new Set(['door', 'entry', 'double']);
@@ -68,7 +68,7 @@ function planDir(out, bearing, el) {
 // How each view is lit by day and by night. Plan is always the same daylight.
 const LOOK = {
   dollhouse: { sun: 2.3, hemi: 1.35, env: 0.45, moon: 0.6, hemiNight: 0.7, envNight: 0.1, exposureNight: 1.0, floorGlow: 1.25 },
-  walk: { sun: 3.2, hemi: 1.25, env: 0.6, moon: 0.1, hemiNight: 0.07, envNight: 0.035, exposureNight: 1.2, floorGlow: 1.0 },
+  walk: { sun: 3.2, hemi: 1.25, env: 0.6, moon: 0, hemiNight: 0.07, envNight: 0.035, exposureNight: 1.2, floorGlow: 1.0 },
 };
 const PLAN = { az: 200, el: 72, sun: 1.7, hemi: 1.6, env: 0.4 };
 
@@ -168,7 +168,7 @@ export function createLighting({ renderer, scene, M, coarse, invalidate }) {
   let U = null, mode = 'dollhouse';
   const center = new THREE.Vector3(15, 0, 10);
   let sunDist = 90;
-  let rooms = [];            // per U.rooms index: { room, cans, texels, focus helpers }
+  let rooms = [];            // per U.rooms index: { room, cans, texels, open (rooms open to it) }
   let switches = [];         // C3: { room, name, objects, pos }, plus lever state
   let built = [];            // meshes and geometry to dispose on the next unit
   let ring = null, lens = null, plate = null, levers = null, floorGlow = null, ceilGlow = null, glowTex = null, glowBox = null;
@@ -201,8 +201,8 @@ export function createLighting({ renderer, scene, M, coarse, invalidate }) {
   lensMat.customProgramCacheKey = () => 'lighting-lens';
 
   // The fakes: a texture over the plan, red for the floor pools, green for the
-  // ceiling halos. The floor brightens what is there (dst × (1 + glow)); the
-  // ceiling adds its halo.
+  // ceiling's halos and bounced light. The floor brightens what is there
+  // (dst × (1 + glow)); the ceiling adds its light.
   const glowShader = (channel, blending) => new THREE.ShaderMaterial({
     uniforms: { map: { value: null }, box: { value: new THREE.Vector4(0, 0, 1, 1) }, color: { value: new THREE.Color(0xffd6ae) }, gain: { value: 1 } },
     vertexShader: 'varying vec2 vXZ; void main(){ vec4 w = modelMatrix * vec4(position, 1.0); vXZ = w.xz; gl_Position = projectionMatrix * viewMatrix * w; }',
@@ -265,14 +265,14 @@ export function createLighting({ renderer, scene, M, coarse, invalidate }) {
     const e = elevation, north = U?.north ?? 0;
     // Outside, every view: the sky through the windows, the lit windows across the street.
     const sunUp = smooth(-1, 6, e), day = smooth(-9, 10, e), gold = 1 - smooth(3, 26, e);
-    const dusk = smooth(-11, -3, e) * (1 - smooth(1, 14, e));
+    const dusk = smooth(-11, -3, e) * (1 - smooth(-1, 7, e));
     planDir(sky.sunDir, az + north, e);
     planDir(sky.moonDir, az + north + 180, 38);
     sunColor.lerpColors(C.sunDay, C.sunLow, gold);
     sky.top.lerpColors(C.topNight, C.topDusk, smooth(-15, -4, e)).lerp(C.topDay, smooth(-4, 10, e));
     sky.horizon.lerpColors(C.horizonNight, C.horizonDay, smooth(-10, 6, e)).lerp(C.horizonGold, gold * sunUp * 0.45).lerp(C.horizonDusk, dusk * 0.8);
     sky.ground.lerpColors(C.groundNight, C.groundDay, smooth(-10, 4, e));
-    sky.sunColor.copy(sunColor);
+    sky.sunColor.lerpColors(C.sunDay, C.sunLow, gold * 0.6);
     sky.sunAmt = smooth(-2, 1, e);
     sky.moonAmt = 1 - smooth(-8, -2, e);
     sky.night = 1 - smooth(-6, 4, e);
@@ -306,12 +306,12 @@ export function createLighting({ renderer, scene, M, coarse, invalidate }) {
       // off its floor and walls: warm from below, onto the ceiling.
       const b = mode === 'walk' ? bounce * (1 - day) : 0;
       if (b > 0) {
-        const total = hemi.intensity + b * 0.6;
-        hemi.color.lerp(C.bounceDown, (b * 0.6) / total);
-        hemi.groundColor.lerp(C.bounceUp, (b * 0.6) / total);
+        const total = hemi.intensity + b * 0.3;
+        hemi.color.lerp(C.bounceDown, (b * 0.3) / total);
+        hemi.groundColor.lerp(C.bounceUp, (b * 0.3) / total);
         hemi.intensity = total;
       }
-      scene.environmentIntensity = THREE.MathUtils.lerp(L.envNight, L.env, day);
+      scene.environmentIntensity = THREE.MathUtils.lerp(L.envNight, L.env, day) + b * 0.2;
       renderer.toneMappingExposure = THREE.MathUtils.lerp(L.exposureNight, 1, day);
     }
     sun.target.position.copy(center);
@@ -573,8 +573,7 @@ export function createLighting({ renderer, scene, M, coarse, invalidate }) {
     });
     // How brightly the room in focus is lit, for its bounced light.
     const here = lit.find((r) => r.i === focus);
-    const power = here ? here.cans.length + here.lamps.reduce((sum, L) => sum + (L.emitter.power ?? 1), 0) : 0;
-    const next = here ? clamp(Math.sqrt((power * 20) / Math.max(20, rooms[focus].room.area)), 0, 1) : 0;
+    const next = here ? fillOf([...here.cans.map(() => ({ p: 1 })), ...here.lamps.map((L) => ({ p: L.emitter.power ?? 1 }))], rooms[focus].room) : 0;
     if (next !== bounce) { bounce = next; applyLook(); }
     bake();
   }
@@ -588,7 +587,7 @@ export function createLighting({ renderer, scene, M, coarse, invalidate }) {
     const lift = spread * 0.5, k = (y + lift) / y;
     return {
       x, y: y + lift, z, dir: -1, color: WARM, cd: CAN_CD * (1 + 0.6 * (cans.length - 1)) * k * k, members: cans,
-      angle: Math.min(80, 52 + Math.atan(spread / Math.max(1, y)) / DEG) * DEG, penumbra: 0.8, dist: (y + lift) * 1.7 + spread,
+      angle: Math.min(78, 60 + Math.atan(spread / Math.max(1, y)) / DEG) * DEG, penumbra: 0.8, dist: (y + lift) * 1.45 + spread,
     };
   }
   function lampLight(L) {
@@ -600,10 +599,15 @@ export function createLighting({ renderer, scene, M, coarse, invalidate }) {
     };
   }
 
+  // How brightly a room's own lights fill it (0..1), from their power over
+  // its floor area: what its walls and ceiling get back off the floor.
+  const fillOf = (src, room) => clamp(Math.sqrt((src.reduce((sum, s) => sum + s.p, 0) * 20) / Math.max(20, room.area)), 0, 1);
+
   // The fakes, per room: a pool on the floor under every lit source without a
   // real light, a halo on the ceiling around every lit can (and above lamps
-  // whose light goes up). Light reaches the room it's in and the rooms open
-  // to it, never through a wall.
+  // whose light goes up), and light bounced up onto the ceiling of every lit
+  // room. Light reaches the room it's in and the rooms open to it, never
+  // through a wall.
   function bake() {
     if (!glowTex) return;
     const data = glowTex.image.data, { x0, z0, res, nx } = glowBox;
@@ -611,25 +615,28 @@ export function createLighting({ renderer, scene, M, coarse, invalidate }) {
     let any = false, anyCeil = false;
     const srcs = rooms.map((R, i) => {
       const src = [];
-      if (isRoomOn(R.room.id)) for (const c of R.cans) src.push({ x: c.x, z: c.z, h: c.y, floor: c.covered ? 0 : 1, cone: true, halo: 1, haloR: 0.75, wide: 0.3 });
+      if (isRoomOn(R.room.id)) for (const c of R.cans) src.push({ x: c.x, z: c.z, h: c.y, p: 1, floor: c.covered ? 0 : 1, cone: true, halo: 1, haloR: 0.75, wide: 0.3 });
       for (const [uid, L] of lamps) {
         if (L.room !== i || !isLampOn(uid)) continue;
         const shape = L.emitter.shape ?? 'shade', p = L.emitter.power ?? 1, hc = Math.max(0.5, R.room.ceiling - L.y);
         src.push({
-          x: L.x, z: L.z, h: Math.max(0.5, L.y), floor: L.covered ? 0 : p * (shape === 'up' ? 0.3 : 0.75), cone: false,
+          x: L.x, z: L.z, h: Math.max(0.5, L.y), p, floor: L.covered ? 0 : p * (shape === 'up' ? 0.3 : 0.75), cone: false,
           halo: p * (shape === 'up' ? 0.9 : shape === 'shade' ? 0.45 : 0.1), haloR: hc * 0.8, wide: 0,
         });
       }
       return src;
     });
+    const fills = rooms.map((R, i) => (srcs[i].length ? fillOf(srcs[i], R.room) : 0));
     const cos70 = Math.cos(72 * DEG), cos40 = Math.cos(38 * DEG);
     rooms.forEach((R, i) => {
       const src = [...srcs[i]];
-      for (const j of R.open ?? []) src.push(...srcs[j]);
+      let fill = fills[i];
+      for (const j of R.open ?? []) { src.push(...srcs[j]); fill = Math.max(fill, fills[j] * 0.6); }
       if (!src.length) return;
+      const bounced = fill * 0.3;
       for (const t of R.texels) {
         const x = x0 + ((t % nx) + 0.5) * res, z = z0 + (Math.floor(t / nx) + 0.5) * res;
-        let f = 0, c = 0;
+        let f = 0, c = bounced;
         for (const s of src) {
           const r2 = (x - s.x) ** 2 + (z - s.z) ** 2;
           if (s.floor) {
