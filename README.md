@@ -30,7 +30,7 @@ who can look around and make their own version.
   along and stops flush against walls, their trim (baseboards, door casings,
   window stools, at their real heights, so a coffee table slides under a sill
   that stops a sofa), built-ins and other pieces. Pieces collide by their real
-  parts at their real heights (`src/hitbox.js`): chairs tuck under tables and
+  parts at their real heights (`src/parts.js`): chairs tuck under tables and
   desks up to their backs, stools under an island's overhang, a lamp's shade
   over a sofa arm, a side table into a sectional's corner. Fine-tune with the arrow keys
   (1", Alt ¼", Shift 1'), `[` `]` to turn 15° (Alt 1°), or the nudge pad on the

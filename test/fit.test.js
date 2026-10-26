@@ -1,4 +1,4 @@
-// Hitboxes and the collision engine (src/hitbox.js, src/fit.js): pieces meet
+// Hitboxes and the collision engine (src/parts.js, src/fit.js): pieces meet
 // part by part, so chairs tuck under tables, stools under an island's
 // overhang and lamp shades over a sofa's arm, while real overlaps are caught.
 import { test } from 'node:test';
@@ -7,7 +7,7 @@ import { buildUnit, cleanUnit } from '../src/unit.js';
 import { cleanAsset } from '../src/design.js';
 import { catalogByType } from '../src/catalog.js';
 import { blockersFor, slideTo, problems, collides, clearances, settleOffWalls, collisionShapes } from '../src/fit.js';
-import { localParts, pieceParts } from '../src/hitbox.js';
+import { localParts, pieceParts } from '../src/parts.js';
 
 // A 24' × 16' room: an island with its overhang facing south, a wall cabinet
 // on the north wall, and a kitchen run (fridge, then a base cabinet) on the east wall.

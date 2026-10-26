@@ -1,11 +1,11 @@
 import * as THREE from 'three';
 import { Batch, Frame } from './kit.js';
 import { catalogByType, SWATCHES } from './catalog.js';
-import { plantLeafY } from './hitbox.js';
+import { plantLeafY } from './parts.js';
 
 // 3D models for placed furniture: the catalog pieces, and custom assets built
 // from primitives (see src/design.js for their format). Pieces collide by the
-// parts in src/hitbox.js, which follow these builders: change both together,
+// parts in src/parts.js, which follow these builders: change both together,
 // and keep every piece inside its footprint (only a TV may overhang it).
 export { CATALOG, catalogByType, SWATCHES, isFlat, footprint, bounds, nearPiece } from './catalog.js';
 

@@ -1,12 +1,12 @@
 // Will it fit? Overlap, clearance and free-spot checks for placed pieces, used
 // by the browser (clearance lines, snapping) and the server (MCP tools). Feet.
 // `U` is a built unit (src/unit.js buildUnit). Pieces collide by their parts
-// (src/hitbox.js), so a chair tucks under a table; `assets` (the design's
+// (src/parts.js), so a chair tucks under a table; `assets` (the design's
 // custom assets, by id or as a list) gives custom pieces their parts.
 
 import { footprint, isFlat } from './catalog.js';
 import { overlap, rectPoly, frontOf, polyBounds } from './geometry.js';
-import { pieceBody, pieceParts, placeBody, fixtureParts } from './hitbox.js';
+import { pieceBody, pieceParts, placeBody, fixtureParts } from './parts.js';
 
 export { overlap };
 
@@ -183,7 +183,7 @@ const edgePoly = (p, u, n, s0, s1, t0, t1) => [[s0, t0], [s1, t0], [s1, t1], [s0
 
 const shapeCache = new WeakMap();
 // Walls, trim and built-ins of a unit (not furniture), built once per unit.
-// Built-ins come as their parts (src/hitbox.js): an island's overhang, wall
+// Built-ins come as their parts (src/parts.js): an island's overhang, wall
 // cabinets and closet rods at their real heights.
 export function collisionShapes(U) {
   if (!U) return [];
@@ -277,7 +277,7 @@ function separation(a, ox, oz, b) {
   return best;
 }
 
-// The deepest overlap of a body (src/hitbox.js pieceBody) at (x, z) with any
+// The deepest overlap of a body (src/parts.js pieceBody) at (x, z) with any
 // shape, part by part: only parts that share some height can meet.
 function deepest(body, x, z, shapes) {
   const bx0 = x + body.box[0], bz0 = z + body.box[1], bx1 = x + body.box[2], bz1 = z + body.box[3];

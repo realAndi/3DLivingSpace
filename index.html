@@ -868,6 +868,16 @@ h1 a:hover { color: var(--oak); }
     <div class="loading" id="loading">Building the unit…</div>
   </main>
 </div>
-<script type="module" src="./src/main.js"></script>
+<!-- If any part of the app can't load (a blocker stopping a file, a dropped
+     connection), say so instead of building forever. -->
+<script>
+function appFailed() {
+  var el = document.getElementById('loading');
+  if (!el || (window.app && window.app.ready)) return;
+  el.innerHTML = '<div class="error">Part of 3D Living Space didn\u2019t load. If you use an ad or tracker blocker, allow this site, then reload.<br><br><button class="btn" onclick="location.reload()">Reload</button></div>';
+}
+setTimeout(appFailed, 25000);
+</script>
+<script type="module" src="./src/main.js" onerror="appFailed()"></script>
 </body>
 </html>
