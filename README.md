@@ -7,6 +7,11 @@ doors, windows, kitchen and baths while you watch. Then furnish it yourself or
 ask Claude to, walk through it, measure anything, and send the link to anyone,
 who can look around and make their own version.
 
+Or with no server at all: the Claude skill in `skill/3d-living-space/` builds
+the unit in a conversation and publishes it as a claude.ai Artifact, the same
+app with its data in the Artifact's own database (see [As a Claude
+skill](#as-a-claude-skill)).
+
 **Live:** https://reallyitsandi.com/3DLivingSpace/
 
 ## Using it
@@ -96,6 +101,61 @@ piece faces south.
 | `check_unit` | The unit's problems, and each piece's clear floor and problems |
 | `render_plan` | A labeled top-down picture with inch coordinates, to compare with the floor plan |
 
+## As a Claude skill
+
+The skill gives Claude the same twelve tools as scripts it runs itself, and
+publishes the result as an Artifact: the whole 3D app, served by claude.ai, with
+nothing on this server and no MCP connector. The person shares their floor plan
+and photos in a conversation; Claude builds the unit, checks it against the plan,
+publishes it and gives them the link; they walk through it, furnish it and share
+it from claude.ai's Share menu.
+
+**Install.** `npm run skill` builds `dist/3d-living-space/` and
+`dist/3d-living-space.zip` (about 4 MB: the scripts, the `src/` modules they
+use, zod and resvg's WebAssembly build vendored, the fonts, and the app's files
+prebuilt). Nothing needs installing where it runs: only Node 18 or later.
+
+- **Claude Code** (CLI or desktop app, where the Artifact and ArtifactData tools
+  are): copy the folder to `~/.claude/skills/` (or a project's
+  `.claude/skills/`), then ask "Build my apartment in 3D from this floor plan"
+  with the plan attached.
+- **claude.ai:** upload the zip under Customize, Skills (code execution on).
+  Chat there has no Artifact tool to publish with, so Claude builds, checks and
+  draws the unit the same way and hands over the page as one HTML file
+  (`bundle --single`) to download and open.
+
+**The scripts.** `node scripts/space.mjs <command>`, over a work folder that holds
+the unit between calls:
+
+| Command | |
+| --- | --- |
+| `get_unit` … `render_plan` | The MCP tools by the same names, taking the same JSON (checked by the same zod schemas, `src/tools.js`) and answering the same way (`src/agent.js`). `render_plan` writes a PNG; `--overlay <floor plan> --overlay-scale <px per inch> --overlay-origin <x,y>` lays the plan over it |
+| `new [--example]`, `help [tool]`, `doctor` | A fresh unit or the example's rooms; a tool's input as JSON Schema; Node and the renderer |
+| `bundle` | The Artifact's files and the publish call to make; `--snapshot-only` refreshes the snapshot; `--single` writes the one-file page |
+| `pull`, `push` | Keep the work folder and the Artifact's database in step: the ArtifactData reads and versioned batch writes to make |
+
+**The Artifact.** Its page is `index.html` and `src/` as they are, with the
+page's outer shell trimmed (`skill/3d-living-space/scripts/app.mjs`); its first
+line tells `src/main.js` to load `src/claude-store.js` in place of
+`src/sync.js`. It paints at once from `unit.json`, a snapshot published beside
+it (all that visitors who aren't signed in see), then lives in the Artifact's
+`db`:
+
+| Document | |
+| --- | --- |
+| `unit/spec`, `unit/layout`, `unit/info`, `assets/<id>` | The unit, the furniture, the name, custom pieces. Everyone reads them; editors and Claude write them, live in every open page |
+| `data/users/<id>/version` | Someone's own version, private to them |
+| `suggestions/<id>` | Their version sent back: only editors read it, and apply it with `src/changes.js` |
+
+Who can do what follows claude.ai's sharing: Editors furnish it; Contributors
+make their own version and suggest it; Viewers and anyone with a public link look
+around. Everyone with it open sees the others walking through as figures
+(`src/together.js`, the `room` capability), and a selected piece's *Ask Claude*
+hands it to the viewer's own conversation with Claude beside the page.
+`test/harness/` stands in for claude.ai locally: the page in the platform's own
+skeleton, with a `window.claude` whose `db`, `user` and `room` follow the
+capability contracts, and a small Chrome driver.
+
 ## How a unit is described
 
 A unit (`src/unit.js`) is plain data, so the browser and the server build the
@@ -151,7 +211,9 @@ Node 24 or later.
 ```sh
 npm install
 npm start          # http://localhost:8790/
-npm test           # starts the server on a scratch database and drives the API and MCP tools
+npm test           # starts the server on a scratch database and drives the API and MCP tools, and the skill's scripts
+npm run skill      # the skill, packaged: dist/3d-living-space/ and its zip
+node test/harness/server.mjs   # the page as an Artifact: http://127.0.0.1:8791/?as=owner (see test/harness/README.md)
 ```
 
 `BASE_PATH` serves it under a path (production uses `/3DLivingSpace`),
@@ -188,11 +250,15 @@ fixes the origin used in links.
 | `src/furniture.js`, `src/layout.js` | 3D furniture and custom pieces; placing, dragging, clearances |
 | `src/interact.js` | Things you can use: doors, fixtures' doors and drawers, lamps, screens, curtains, fans, light switches; the prompts |
 | `src/sync.js` | Opening, creating, copying and saving units; live updates |
+| `src/claude-store.js`, `src/together.js` | As an Artifact: the unit in the Artifact's database, your own version, suggestions; who else is walking through, and handing a piece to Claude |
+| `src/tools.js`, `src/agent.js`, `src/drawing.js` | The agent's tools, shared by the MCP server and the skill: what they take (zod), what they do, and the plan they draw |
 | `src/measure.js`, `src/walk.js`, `src/units.js` | Tape measure, first-person controls, display units |
 | `src/materials.js`, `src/textures.js`, `assets/tex/` | Materials with color, normal and roughness maps: finishes drawn in code, and CC0 scans of fabric, leather, carpet, walnut, marble and concrete (sources in `assets/tex/SOURCES.md`), loaded when first used at a quality that suits the device |
 | `src/surroundings.js` | The view out the windows, by day and by night |
 | `src/lighting.js`, `src/lightpanel.js` | The sun, sky and exposure by time of day; room lights, switches and lamps on a fixed pool of real lights; the lights panel |
 | `server/` | HTTP server, units API, per-unit MCP servers, plan pictures (`render.js`, IBM Plex fonts under the OFL) |
+| `skill/` | The Claude skill (`3d-living-space/`: SKILL.md and its scripts) and its packager (`package.mjs`) |
+| `test/harness/` | The Artifact's viewer, locally, for testing the page as an Artifact |
 
 ## Deploying
 

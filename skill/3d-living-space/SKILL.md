@@ -134,7 +134,9 @@ When the plan matches and nothing is reported:
    a door, a drawer or a lamp, the tape measure, the time of day, furnishing. And how
    sharing works: the Share menu at the top of the Artifact. People they share it with
    as Editors can furnish it; Contributors can make their own version and suggest it
-   back; Viewers, and anyone with a public link, can look around.
+   back; Viewers, and anyone with a public link, can look around. Everyone with the
+   page open sees the others walking through it, and a selected piece's *Ask Claude*
+   button hands that piece to you in this conversation.
 
 ## Changing a published unit
 
@@ -166,9 +168,10 @@ with the tools and pushing.
 ## Without the Artifact tools
 
 Where there's no Artifact tool (claude.ai chat, the API), build, check and draw the
-unit the same way and show them the plan. Then `node $S/space.mjs bundle --single`
-writes the whole page with their unit inside as one HTML file (about 4 MB): give
-them that file to download and open in a browser. It works offline except for the 3D
+unit the same way and show them the plan. Then `node $S/space.mjs bundle --single
+--out <file>` writes the whole page with their unit inside as one HTML file (about
+4 MB): save it where they can download it (on claude.ai, the outputs folder) and
+tell them to open it in a browser. It works offline except for the 3D
 library and fonts, keeps their furniture changes in that browser, and has no sharing;
 the live, shareable page needs Claude Code.
 
