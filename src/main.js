@@ -28,6 +28,11 @@ const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
 const stage = $('#stage'), canvas = $('#scene'), panel = $('#panel');
 const coarse = matchMedia('(pointer: coarse)').matches;
+// No browser context menu on the app (right-drag pans the views); text fields
+// keep theirs, for copying links by hand.
+document.addEventListener('contextmenu', (e) => {
+  if (!e.target.closest?.('input, textarea, [contenteditable]')) e.preventDefault();
+});
 // Phones held upright and narrow windows: the panel is a bottom sheet. Phones
 // held sideways keep a slim side panel, since a sheet would cover the view.
 const sheetMQ = matchMedia('(max-width: 899px) and (orientation: portrait), (max-width: 899px) and (min-height: 560px)');
