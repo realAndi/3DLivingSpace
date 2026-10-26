@@ -357,6 +357,28 @@ h1 a:hover { color: var(--oak); }
 /* Under the visitor chip, not on top of it. */
 .stage.visitor .walk-lock-pill { top: calc(max(16px, env(safe-area-inset-top, 0px)) + 112px); }
 
+/* What E, a tap or a click would use (src/interact.js): a pill under the
+   crosshair, a pill on the thing itself to tap (phones in Walk), or a small
+   label beside the mouse. */
+.use-prompt {
+  position: absolute; left: 0; top: 0; z-index: 4; pointer-events: none; margin: 0; border: 0;
+  display: flex; align-items: center; gap: 7px; white-space: nowrap; will-change: transform;
+  background: var(--chip); color: var(--on-chip); box-shadow: var(--shadow);
+  font: 600 12.5px/1.2 var(--font-ui); padding: 7px 13px; border-radius: 999px;
+}
+.use-prompt[hidden] { display: none; }
+.use-prompt kbd {
+  font: 600 11px/1 var(--font-ui); padding: 2px 5px; border-radius: 4px;
+  border: 1px solid color-mix(in srgb, var(--on-chip) 45%, transparent);
+}
+.use-prompt.tap { pointer-events: auto; cursor: pointer; min-height: 36px; padding: 9px 15px 9px 12px; }
+.use-prompt.tap::before { content: ""; flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--oak); box-shadow: 0 0 0 3px color-mix(in srgb, var(--oak) 30%, transparent); }
+.use-prompt.hover {
+  font-weight: 500; font-size: 12px; padding: 5px 9px; border-radius: 6px;
+  background: var(--surface); color: var(--ink); box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+}
+.stage.can-use #scene { cursor: pointer; }
+
 /* ---------- Stage cards: the empty unit, a missing unit, no connection ---------- */
 .stage-card {
   position: absolute; inset: calc(max(16px, var(--safe-t)) + 64px) 16px 24px; z-index: 2;
@@ -851,7 +873,7 @@ h1 a:hover { color: var(--oak); }
               <button class="btn" id="openDoors">Open all</button>
               <button class="btn" id="closeDoors">Close all</button>
             </div>
-            <p class="section-note" style="margin:10px 0 0">Tap or click any door to open or shut it. In Walk, E works the door you're facing.</p>
+            <p class="section-note" style="margin:10px 0 0">Tap or click a door, cabinet, drawer, appliance or lamp to use it. In Walk, E uses what you're facing.</p>
           </div>
           <div class="group" id="measuredGroup" hidden>
             <h2>How it was measured</h2>
@@ -949,6 +971,7 @@ h1 a:hover { color: var(--oak); }
     </div>
 
     <div class="hint" id="hint"></div>
+    <button class="use-prompt" id="usePrompt" type="button" hidden></button>
     <div class="piece-bar" id="pieceBar" hidden>
       <div class="pb-meta"><b id="pbName"></b><small id="pbDims"></small></div>
       <div class="pb-actions">

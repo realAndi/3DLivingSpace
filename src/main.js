@@ -13,6 +13,7 @@ import { createLighting } from './lighting.js';
 import { createLightPanel } from './lightpanel.js';
 import { actOf } from './catalog.js';
 import { WalkControls } from './walk.js';
+import { Interactions } from './interact.js';
 import { buildUnit, cleanUnit, emptyUnit } from './unit.js';
 import { pointInPoly, distToSegment, parseFeetInches } from './geometry.js';
 import * as units from './units.js';
@@ -205,37 +206,36 @@ function aim(clientX, clientY, cam) {
   ndc.set(((clientX - r.left) / r.width) * 2 - 1, -((clientY - r.top) / r.height) * 2 + 1);
   ray.setFromCamera(ndc, cam);
 }
-const pickables = () => [arch?.walls, arch?.floors, arch?.trim, fixtures?.solid, furniture.visible ? furniture : null, ...doors.map((d) => d.pivot)].filter(Boolean);
+const pickables = () => [
+  arch?.walls, arch?.floors, arch?.trim, fixtures?.solid, furniture.visible ? furniture : null, ...doors.map((d) => d.pivot),
+  ...(fixtures?.movers ?? []).flatMap((m) => m.objects.filter((o) => o.visible)),
+].filter(Boolean);
 
-// The swinging door a hit belongs to: the leaf itself, or its frame, casing or
-// the wall within 6" of the opening, so a tap doesn't have to land on the slab.
-function doorAt(h) {
-  if (!h) return null;
-  if (h.object.userData.doorId) return h.object.userData.doorId;
-  if (h.face && Math.abs(h.face.normal.y) > 0.5) return null;
-  const p = h.point;
-  for (const o of U.openings) {
-    if (!doors.some((d) => d.id === o.id)) continue;
-    const dx = p.x - o.p[0], dz = p.z - o.p[1];
-    const s = dx * o.u[0] + dz * o.u[1], t = dx * o.n[0] + dz * o.n[1];
-    if (s > o.a - 0.5 && s < o.b + 0.5 && t > -0.4 && t < o.t1 + 0.4 && p.y < o.head + 0.5) return o.id;
-  }
-  return null;
-}
-
-// TEMP (lighting): light switches work by tap, click and E through the door
-// paths below (ids 'switch:<room>') until src/interact.js's registry takes them.
-const switchRoomOf = (h) => h?.object.userData.switchRoom;
-const withSwitches = () => (mode === 'plan' ? pickables() : [...pickables(), ...lighting.switches.flatMap((s) => s.objects)]);
+// ---------------------------------------------------------------------------
+// Things you can use (src/interact.js): hinged doors, the doors and drawers of
+// the kitchen, baths and laundry, lamps, TVs, curtains, fans, light switches.
+// A tap or click on one uses it in every view; in Walk, E uses the one at the
+// crosshair (or else the nearest one ahead). A small prompt says what either
+// would do. Made before Walk and the furniture editor so its taps come first.
+const things = new Interactions({
+  canvas, stage, prompt: $('#usePrompt'), invalidate,
+  view: () => ({
+    mode, camera: activeCam(), locked: walk.locked, coarse, cover: covered,
+    busy: tape.active || layout.dragging != null,
+    clipY: cutaway && mode === 'dollhouse' ? clipPlane.constant : Infinity,
+  }),
+  pieces: () => (furniture.visible ? { items: layout.items, assets: layout.assets } : null),
+});
 
 function pickWalk(cx, cy) {
-  if (tape.active) return null;
+  if (tape.active || things.tapped) return null;
+  const thing = things.at(cx, cy);
+  if (thing) return { type: 'use', key: thing.key };
   aim(cx, cy, walkCam);
-  const h = ray.intersectObjects(withSwitches(), true)[0];
+  const h = ray.intersectObjects(pickables(), true)[0];
   if (!h) return null;
-  if (switchRoomOf(h)) return h.distance < 9 ? { type: 'door', id: `switch:${switchRoomOf(h)}` } : null; // TEMP (lighting)
-  const door = doorAt(h);
-  if (door) return { type: 'door', id: door };
+  const key = things.keyAt(h);
+  if (key) return { type: 'use', key };
   const p = h.point.clone();
   if (h.face && Math.abs(h.face.normal.y) < 0.5) {
     const back = new THREE.Vector3(walk.x - p.x, 0, walk.z - p.z);
@@ -247,11 +247,12 @@ function pickWalk(cx, cy) {
 const walk = new WalkControls(walkCam, canvas, {
   isBlocked,
   pick: pickWalk,
-  onTapDoor: (id) => toggleDoor(id),
+  onUse: (key) => things.use(key),
   onInteract: () => interact(),
   onUserMove: () => { dismissHint(); invalidate(); },
-  // A click while measuring places a point instead of grabbing the mouse.
-  canLock: () => !tape.active && !layout.dragging,
+  // A click while measuring places a point instead of grabbing the mouse, and
+  // a click on something you can use uses it.
+  canLock: () => !tape.active && !layout.dragging && !things.pressing,
   onLockChange: (locked) => { if (locked) dismissHint(); else if (mode === 'walk') showHint(); invalidate(); },
 });
 walk.attachJoystick($('#joystick'), $('#joystick .knob'));
@@ -263,47 +264,17 @@ function startPose() {
 walk.setPose(startPose());
 
 // ---------------------------------------------------------------------------
-// Doors
-// E in Walk: the door at the crosshair (the middle of the view), or else the
-// nearest door ahead within reach.
+// Doors and the rest: E, Open all / Close all.
+// E in Walk: the thing at the crosshair (the middle of the view), or else the
+// nearest one ahead within reach.
 function interact() {
-  if (mode !== 'walk') return;
-  const r = canvas.getBoundingClientRect();
-  const hit = pickWalk(r.left + r.width / 2, r.top + r.height / 2);
-  if (hit?.type === 'door' && String(hit.id).startsWith('switch:')) { toggleDoor(hit.id); return; } // TEMP (lighting)
-  if (hit?.type === 'door' && doorDistance(hit.id) < 9) { toggleDoor(hit.id); return; }
-  const fx = Math.sin(walk.yaw * DEG), fz = -Math.cos(walk.yaw * DEG);
-  let best = null;
-  for (const o of U.openings) {
-    if (!doors.some((d) => d.id === o.id)) continue;
-    const dx = o.x - walk.x, dz = o.z - walk.z, dist = Math.hypot(dx, dz);
-    if (dist > 6 || (dist > 1.5 && (dx * fx + dz * fz) / dist < Math.cos(55 * DEG))) continue;
-    if (!best || dist < best.dist) best = { id: o.id, dist };
-  }
-  if (best) toggleDoor(best.id);
+  if (mode !== 'walk' || tape.active) return;
+  const t = things.aimed();
+  if (t) things.use(t.key);
 }
-const doorDistance = (id) => { const o = U.openings.find((x) => x.id === id); return o ? Math.hypot(o.x - walk.x, o.z - walk.z) : Infinity; };
-
-function toggleDoor(id) {
-  if (String(id).startsWith('switch:')) { lighting.toggleRoom(id.slice(7)); return; } // TEMP (lighting)
-  const d = doors.find((x) => x.id === id);
-  if (!d) return;
-  d.target = d.target > 10 ? 0 : d.openTo;
-  invalidate();
-}
-function animateDoors(dt) {
-  let moving = false;
-  for (const d of doors) {
-    const diff = d.target - d.angle;
-    if (Math.abs(diff) < 0.05) continue;
-    d.angle += Math.sign(diff) * Math.min(Math.abs(diff), Math.max(30, Math.abs(diff) * 5) * dt);
-    d.apply();
-    moving = true;
-  }
-  return moving;
-}
-$('#openDoors').addEventListener('click', () => { doors.forEach((d) => { d.target = d.openTo; }); invalidate(); });
-$('#closeDoors').addEventListener('click', () => { doors.forEach((d) => { d.target = 0; }); invalidate(); });
+function toggleDoor(id) { things.use(`door:${id}`); }
+$('#openDoors').addEventListener('click', () => things.setAll('door:', true));
+$('#closeDoors').addEventListener('click', () => things.setAll('door:', false));
 
 // ---------------------------------------------------------------------------
 // Theme
@@ -488,9 +459,10 @@ const layout = new LayoutEditor({
   onSelect: (id) => { stage.classList.toggle('piece-active', id != null); if (id != null) dismissHint(); },
   onOps: (ops) => session.queue(ops),
   onAdded: () => { if (narrow()) setSheet(false); },
-  // Lamps light the room when on (src/lighting.js).
-  onMount: (item, g) => { if (actOf(item, layout.assets) === 'light') lighting.addLamp(item.uid, g); },
-  onUnmount: (uid) => lighting.removeLamp(uid),
+  // Lamps light the room when on (src/lighting.js), and pieces you can switch
+  // or open (lamps, TVs, curtains, fans) join the things you can use.
+  onMount: (item, g) => { if (actOf(item, layout.assets) === 'light') lighting.addLamp(item.uid, g); things.addPiece(item, g); },
+  onUnmount: (uid) => { things.removePiece(uid); lighting.removeLamp(uid); },
   onEdit: () => {
     openTab('t-furniture');
     $('#pieceEditor').scrollIntoView({ block: 'nearest' });
@@ -545,7 +517,7 @@ canvas.addEventListener('pointerup', () => { if (tape.active) queueMicrotask(ren
 // The lights panel: time of day and each room's lights (src/lightpanel.js).
 createLightPanel({ lighting, button: $('#lightsBtn'), pop: $('#lightsPop'), getMode: () => mode, onOpen: () => { if (narrow()) setSheet(false); } });
 
-// Taps in Dollhouse / Plan: measure, swing doors, double-tap to walk in.
+// Taps in Dollhouse / Plan: measure, use things, double-tap to walk in.
 let down = null;
 let lastTap = { t: 0, x: 0, y: 0 };
 canvas.addEventListener('pointerdown', (e) => {
@@ -558,12 +530,11 @@ const endTap = (e) => {
   const moved = Math.hypot(e.clientX - down.x, e.clientY - down.y);
   const held = performance.now() - down.t;
   down = null;
-  if (e.type === 'pointercancel' || moved > 7 || held > 500) return;
+  if (e.type === 'pointercancel' || moved > 7 || held > 500 || things.tapped) return;
   aim(e.clientX, e.clientY, activeCam());
-  const h = ray.intersectObjects(withSwitches(), true)[0];
-  if (switchRoomOf(h)) { lighting.toggleRoom(switchRoomOf(h)); return; } // TEMP (lighting)
-  const door = doorAt(h);
-  if (door) { toggleDoor(door); return; }
+  const h = ray.intersectObjects(pickables(), true)[0];
+  const key = things.keyAt(h);
+  if (key) { things.use(key); return; }
   const now = performance.now();
   if (h && now - lastTap.t < 400 && Math.hypot(e.clientX - lastTap.x, e.clientY - lastTap.y) < 36) {
     lastTap.t = 0;
@@ -631,7 +602,7 @@ function showUnit(spec, { fresh = false } = {}) {
     doors = arch.doors ?? [];
     doors.forEach((d) => built.add(d.pivot));
   }
-  if (fixtures) built.add(fixtures.solid, fixtures.glass, fixtures.soffit);
+  if (fixtures) built.add(fixtures.solid, fixtures.glass, fixtures.soffit, fixtures.movable);
   if (!U.empty) {
     city = buildSurroundings(U);
     scene.add(city);
@@ -643,6 +614,8 @@ function showUnit(spec, { fresh = false } = {}) {
   lighting.setUnit(U);
   layout.setUnit(U);
   tape.setUnit(U);
+  things.setUnit(U, { doors, movers: fixtures?.movers ?? [] });
+  things.connectLighting(lighting);
   clearHighlight();
   buildPlanOverlay();
   renderRooms();
@@ -1011,7 +984,7 @@ const activeCam = () => (mode === 'walk' ? walkCam : mode === 'plan' ? planCam :
 const HINTS = {
   dollhouse: coarse ? 'Drag to orbit · Pinch to zoom · Double-tap a room to walk in' : 'Drag to orbit · Right-drag to pan · Scroll to zoom · Double-click a room to walk in',
   plan: coarse ? 'Drag to pan · Pinch to zoom · Double-tap to walk in' : 'Drag to pan · Scroll to zoom · Double-click to walk in',
-  walk: coarse ? 'Drag to look · Use the pad to move · Tap the floor to walk there · Tap a door to open or shut it' : 'Click to look around · WASD or arrows to move · E opens and shuts doors',
+  walk: coarse ? 'Drag to look · Use the pad to move · Tap the floor to walk there · Tap a door, drawer or lamp to use it' : 'Click to look around · WASD or arrows to move · E opens, shuts or switches what you face',
 };
 const hint = $('#hint');
 let hintTimer = 0;
@@ -1251,10 +1224,11 @@ function frame(now = performance.now()) {
   if (mode === 'dollhouse') changed = doll.update() || changed;
   else if (mode === 'plan') { plan.update(); changed = planMoved() || changed; }
   else changed = walk.update(dt) || changed;
-  changed = animateDoors(dt) || changed;
+  changed = things.step(dt) || changed;
   changed = stepHighlight(dt) || changed;
   changed = lighting.update(activeCam(), dt) || changed;
-  if (!changed) return;
+  // The prompt for what you can use follows the view either way.
+  if (!changed) { things.update(now); return; }
   needsRender = false;
   renderer.render(scene, activeCam());
   updateLabels();
@@ -1262,6 +1236,7 @@ function frame(now = performance.now()) {
   tape.update(activeCam());
   drawMinimap();
   updateScalebar();
+  things.update(now);
   if (!ready.shown && ready.session) {
     ready.shown = true;
     $('#loading').classList.add('done');
@@ -1284,8 +1259,9 @@ renderTapeUI();
 // Small hook for scripted screenshots and tests.
 window.app = {
   ready: false,
-  setMode, focusRoom, toggleDoor, invalidate, walk, setSheet, layout, session, tape, units, lighting,
+  setMode, focusRoom, toggleDoor, invalidate, walk, setSheet, layout, session, tape, units, lighting, things, interact,
   get doors() { return doors; },
+  get movers() { return fixtures?.movers ?? []; },
   get U() { return U; },
   // GPU memory and draw counts, to check that rebuilds don't leak.
   get stats() { return { ...renderer.info.memory, calls: renderer.info.render.calls }; },

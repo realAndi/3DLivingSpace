@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { Batch, Frame } from './kit.js';
 import { paint } from './materials.js';
 
@@ -10,8 +11,13 @@ import { paint } from './materials.js';
 // its front (d), y up; then placed at (x, 0, z) turned by its rotation.
 // Proportions and details come from the example unit's kitchen and bath
 // photos.
+//
+// Their doors and drawers open (see "Moving parts" below): cabinets are
+// hollow behind them, with shelves; ovens have racks, the dishwasher a tub
+// and racks, the fridge a lit liner that shows while it is open.
 
 const DEG = Math.PI / 180;
+const UP = new THREE.Vector3(0, 1, 0);
 
 // Kitchen dimensions, in feet.
 const TOE = 0.33, TOE_IN = 0.25;  // toe kick height and recess
@@ -78,6 +84,165 @@ function hardwareMat(M, key) {
 }
 
 // ---------------------------------------------------------------------------
+// Moving parts: doors that swing, doors that drop open, drawers that slide.
+// A leaf is drawn like everything else, through the fixture's frame, but into
+// a batch of its own, and moves on a bone at its hinge. buildMovers() merges
+// every leaf of the unit per material into one skinned mesh, so they draw as
+// one call per material however many there are, and a door opens by turning
+// its bone. Each mover is what one tap or E works: a cabinet's pair of doors,
+// a drawer, the fridge's French doors.
+
+// A moving part of the fixture being built, named for the prompt ('fridge', 'drawer').
+function mover(X, name) {
+  const m = { name, fixture: X.fixtureId, leaves: [], inside: null, normal: null };
+  X.movers.push(m);
+  return m;
+}
+
+// A leaf of mover m that moves about the point (s, y, t) of frame F; `motion`
+// gives, from the frame's directions in the world, the axis it turns about
+// and how far (radians), or the way and distance it slides. Draw it through
+// L.B (or pass L where a helper takes X). L.part() draws a box that is also
+// part of what you click the leaf by (the first is its face: where it is, for
+// what's near); L.reach() adds to that without drawing.
+function leaf(X, m, F, s, y, t, motion) {
+  const world = X.B.matrix.clone();
+  const dir = ([a, b]) => new THREE.Vector3(a, 0, b).transformDirection(world);
+  const u = dir(F.u), n = dir(F.n);
+  const [px, pz] = F.p(s, t);
+  const B = new Batch('leaf');
+  B.stack = [world];
+  const L = {
+    ...X, B, F, world, u, n, pivot: new THREE.Vector3(px, y, pz).applyMatrix4(world), box: null, ...motion(u, n),
+    reach(s0, y0, t0, s1, y1, t1) {
+      const b = L.box ??= [Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity];
+      [Math.min(s0, s1), Math.min(y0, y1), Math.min(t0, t1)].forEach((v, i) => { b[i] = Math.min(b[i], v); });
+      [Math.max(s0, s1), Math.max(y0, y1), Math.max(t0, t1)].forEach((v, i) => { b[i + 3] = Math.max(b[i + 3], v); });
+      return L;
+    },
+    part(mat, s0, y0, t0, s1, y1, t1) {
+      F.box(B, mat, s0, y0, t0, s1, y1, t1);
+      L.face ??= [Math.min(s0, s1), Math.min(y0, y1), Math.min(t0, t1), Math.max(s0, s1), Math.max(y0, y1), Math.max(t0, t1)];
+      return L.reach(s0, y0, t0, s1, y1, t1);
+    },
+  };
+  m.normal ??= n;
+  m.leaves.push(L);
+  return L;
+}
+
+// A door hinged on a vertical line at (s, t), its leaf running from there
+// toward +s (side 1) or -s (side -1); it opens 90° out toward the front.
+// (Turning about +y takes a direction e toward (e.z, -e.x).)
+const swing = (X, m, F, s, t, side, deg = 90) => leaf(X, m, F, s, 0, t, (u, n) => {
+  const e = u.clone().multiplyScalar(side);
+  return { axis: new THREE.Vector3(0, Math.sign(e.z * n.x - e.x * n.z) || 1, 0), angle: deg * DEG };
+});
+// A door hinged along its bottom edge at height y on face t: it drops open to level.
+const drop = (X, m, F, y, t, deg = 90) => leaf(X, m, F, 0, y, t, (u, n) => ({ axis: new THREE.Vector3().crossVectors(UP, n), angle: deg * DEG }));
+// A drawer on face t, sliding straight out `out` feet.
+const slide = (X, m, F, y, t, out) => leaf(X, m, F, 0, y, t, (u, n) => ({ slide: n.clone().multiplyScalar(out) }));
+
+// A leaf's place at t (0 shut, 1 open).
+function pose(L, t) {
+  if (L.slide) L.bone.position.copy(L.pivot).addScaledVector(L.slide, t);
+  else L.bone.quaternion.setFromAxisAngle(L.axis, L.angle * t);
+}
+
+// What's only seen while mover m is open (a fridge's lit liner): a batch
+// drawn in the fixture's frame, built into a group that shows while it's open.
+function inside(X, m) {
+  if (!m.inside) { m.inside = new Batch('inside'); m.inside.stack = [X.B.matrix.clone()]; }
+  return m.inside;
+}
+
+// Binds every vertex of g to bone i.
+function bindTo(g, i) {
+  const n = g.attributes.position.count, index = new Uint16Array(n * 4), weight = new Float32Array(n * 4);
+  for (let k = 0; k < n; k++) { index[k * 4] = i; weight[k * 4] = 1; }
+  g.setAttribute('skinIndex', new THREE.Uint16BufferAttribute(index, 4));
+  g.setAttribute('skinWeight', new THREE.Float32BufferAttribute(weight, 4));
+}
+
+const CLICK = new THREE.MeshBasicMaterial({ visible: false });
+
+// Every leaf merged per material into skinned meshes, one bone each; an
+// unseen box on each bone to click it by; and the movers as the rest of the
+// app sees them: { key, fixture, name, objects, pos, normal, open, setOpen(t) }.
+function buildMovers(list) {
+  const group = new THREE.Group();
+  group.name = 'fixture-movers';
+  const bones = [], parts = new Map(), unit = new THREE.BoxGeometry(1, 1, 1), basis = new THREE.Matrix4(), side = new THREE.Vector3();
+  const counts = new Map();
+  const movers = list.filter((m) => m.leaves.length).map((m) => {
+    const n = counts.get(m.fixture) ?? 0;
+    counts.set(m.fixture, n + 1);
+    const objects = [], pos = new THREE.Vector3();
+    for (const L of m.leaves) {
+      const bone = new THREE.Bone();
+      bone.position.copy(L.pivot);
+      group.add(bone);
+      L.bone = bone;
+      const i = bones.push(bone) - 1;
+      for (const [mat, geos] of L.B.parts) {
+        geos.forEach((g) => bindTo(g, i));
+        if (!parts.has(mat)) parts.set(mat, []);
+        parts.get(mat).push(...geos);
+      }
+      L.B.parts.clear();
+      if (!L.box) continue;
+      const [s0, y0, t0, s1, y1, t1] = L.box, [cx, cz] = L.F.p((s0 + s1) / 2, (t0 + t1) / 2);
+      const c = new THREE.Vector3(cx, (y0 + y1) / 2, cz).applyMatrix4(L.world);
+      const box = new THREE.Mesh(unit, CLICK);
+      box.quaternion.setFromRotationMatrix(basis.makeBasis(L.u, UP, side.crossVectors(L.u, UP)));
+      box.scale.set(s1 - s0, y1 - y0, t1 - t0);
+      box.position.copy(c).sub(L.pivot);
+      box.castShadow = box.receiveShadow = false;
+      bone.add(box);
+      objects.push(box);
+      // Where it is: the middle of its face (a drawer's front, not its box).
+      const [a0, b0, , a1, b1, f1] = L.face ?? L.box, [fx, fz] = L.F.p((a0 + a1) / 2, f1);
+      pos.add(new THREE.Vector3(fx, (b0 + b1) / 2, fz).applyMatrix4(L.world));
+    }
+    pos.divideScalar(Math.max(1, objects.length));
+    let shown = null;
+    if (m.inside) {
+      shown = m.inside.build({ shadows: false });
+      shown.visible = false;
+      group.add(shown);
+      objects.push(shown);
+    }
+    const mv = {
+      key: `fix:${m.fixture}:${n}`, fixture: m.fixture, name: m.name, objects,
+      pos: [pos.x, pos.y, pos.z], normal: [m.normal.x, m.normal.y, m.normal.z], open: 0,
+      setOpen(t) {
+        mv.open = t;
+        for (const L of m.leaves) pose(L, t);
+        if (shown) shown.visible = t > 0.002;
+      },
+    };
+    return mv;
+  });
+  group.updateMatrixWorld(true);
+  const skeleton = bones.length ? new THREE.Skeleton(bones) : null;
+  for (const [mat, geos] of parts) {
+    const geo = mergeGeometries(geos, false);
+    geos.forEach((g) => g.dispose());
+    const mesh = new THREE.SkinnedMesh(geo, mat);
+    mesh.name = 'leaves';
+    mesh.bind(skeleton, new THREE.Matrix4());
+    // Bounds that hold every leaf however far it opens, so they are never culled wrongly.
+    geo.computeBoundingSphere();
+    mesh.boundingSphere = geo.boundingSphere.clone();
+    mesh.boundingSphere.radius += 3.5;
+    mesh.castShadow = !mat.transparent;
+    mesh.receiveShadow = true;
+    group.add(mesh);
+  }
+  return { group, movers, skeleton };
+}
+
+// ---------------------------------------------------------------------------
 // Shared parts. X is the build context: batches, materials, the fixture.
 
 function pullV(X, F, s, y0, len, t) {
@@ -94,22 +259,49 @@ function pullH(X, F, s, y, len, t) {
   F.box(B, hw, s + len / 2 - 0.075, y - 0.012, t, s + len / 2 - 0.04, y + 0.012, t + 0.08);
 }
 
-// Slab doors across [s0, s1] and [y0, y1] on face t. Pulls near the top
-// (base), bottom (uppers) or at a given height.
-function doors(X, F, mat, s0, s1, y0, y1, t, count, { pullsAt = 'top', hingeLeft = true } = {}) {
-  const g = 0.012, B = X.B;
+// Slab doors across [s0, s1] and [y0, y1] on face t, hinged at their outer
+// edges (a pair opens together). Pulls near the top (base), bottom (uppers)
+// or at a given height.
+function doors(X, F, mat, s0, s1, y0, y1, t, count, { pullsAt = 'top', hingeLeft = true, name = 'cabinet' } = {}) {
+  const g = 0.012, m = mover(X, name);
   const len = Math.min(0.55, (y1 - y0) * 0.6);
   const py = typeof pullsAt === 'number' ? pullsAt - len / 2 : pullsAt === 'top' ? Math.max(y0 + 0.05, y1 - 0.72) : y0 + 0.17;
   if (count === 1) {
-    F.box(B, mat, s0 + g, y0 + g, t, s1 - g, y1 - g, t + DOOR);
-    pullV(X, F, hingeLeft ? s1 - 0.14 : s0 + 0.14, py, len, t + DOOR);
+    const L = swing(X, m, F, hingeLeft ? s0 + g : s1 - g, t + DOOR, hingeLeft ? 1 : -1);
+    L.part(mat, s0 + g, y0 + g, t, s1 - g, y1 - g, t + DOOR);
+    pullV(L, F, hingeLeft ? s1 - 0.14 : s0 + 0.14, py, len, t + DOOR);
     return;
   }
   const mid = (s0 + s1) / 2;
-  F.box(B, mat, s0 + g, y0 + g, t, mid - g / 2, y1 - g, t + DOOR);
-  F.box(B, mat, mid + g / 2, y0 + g, t, s1 - g, y1 - g, t + DOOR);
-  pullV(X, F, mid - 0.14, py, len, t + DOOR);
-  pullV(X, F, mid + 0.14, py, len, t + DOOR);
+  const a = swing(X, m, F, s0 + g, t + DOOR, 1), b = swing(X, m, F, s1 - g, t + DOOR, -1);
+  a.part(mat, s0 + g, y0 + g, t, mid - g / 2, y1 - g, t + DOOR);
+  b.part(mat, mid + g / 2, y0 + g, t, s1 - g, y1 - g, t + DOOR);
+  seam(b, F, mat, mid - g / 2, mid + g / 2, y0 + g, y1 - g, t);
+  pullV(a, F, mid - 0.14, py, len, t + DOOR);
+  pullV(b, F, mid + 0.14, py, len, t + DOOR);
+}
+
+// A drawer in a cabinet over [s0, s1]: its front on face t over [y0, y1], a
+// pull at height py, and the box behind it, sliding out most of its depth.
+function drawer(X, F, mat, s0, s1, y0, y1, t, py, name = 'drawer') {
+  const L = slide(X, mover(X, name), F, (y0 + y1) / 2, t, Math.min(1.5, (t - 0.2) * 0.8));
+  L.part(mat, s0 + 0.012, y0, t, s1 - 0.012, y1, t + DOOR);
+  pullH(L, F, (s0 + s1) / 2, py, Math.min(0.62, (s1 - s0) * 0.5), t + DOOR);
+  const a = s0 + 0.09, b = s1 - 0.09, lo = y0 + 0.06, hi = y1 - 0.12, back = 0.16, w = 0.035;
+  if (hi - lo < 0.15 || t - back < 0.4) return;
+  F.box(L.B, mat, a, lo, back, b, lo + w, t);
+  F.box(L.B, mat, a, lo, back, a + w, hi, t);
+  F.box(L.B, mat, b - w, lo, back, b, hi, t);
+  F.box(L.B, mat, a, lo, back, b, hi, back + w);
+  L.reach(a, lo, back, b, hi, t);
+}
+
+// A strip on the back of a pair's right leaf, behind the gap between the
+// leaves [s0, s1], so the gap shows a face as it did before cabinets were
+// hollow, not the dark inside (and a click in the gap still finds the pair).
+function seam(L, F, mat, s0, s1, y0, y1, t) {
+  F.box(L.B, mat, s0 - 0.03, y0, t - 0.004, s1, y1, t);
+  L.reach(s0, y0, t, s1, y1, t);
 }
 
 const doorCount = (w) => (w > 1.75 ? 2 : 1);
@@ -118,46 +310,93 @@ function toeKick(X, F, s0, s1, cd) {
   F.box(X.B, X.M.toeKick, s0, 0, 0, s1, TOE, cd - TOE_IN);
 }
 
-// A cabinet box from y0 to y1; with `open` set, only its walls above that
-// height, so a sink bowl hung under the counter shows instead of the box.
-function carcass(X, F, mat, s0, s1, y0, y1, depth, open = null) {
-  const B = X.B;
-  if (open === null || open <= y0 || open >= y1) { F.box(B, mat, s0, y0, 0, s1, y1, depth); return; }
-  F.box(B, mat, s0, y0, 0, s1, open, depth);
-  F.box(B, mat, s0, open, 0, s0 + 0.06, y1, depth);
-  F.box(B, mat, s1 - 0.06, open, 0, s1, y1, depth);
-  F.box(B, mat, s0, open, 0, s1, y1, 0.06);
-  F.box(B, mat, s0, open, depth - 0.06, s1, y1, depth);
+// A cabinet box from y0 to y1, hollow behind the fronts that open: `bays`
+// lists their [y0, y1] spans, each an open-fronted compartment with a panel
+// between it and the next; the rest is solid. With `open` (a sink's bowl hangs
+// in it) one hollow from the bottom panel up, with a rail across the front
+// from that height. From outside it is the same box either way.
+function carcass(X, F, mat, s0, s1, y0, y1, depth, { bays = null, open = null } = {}) {
+  const th = 0.05, box = [s0, y0, 0, s1, y1, depth], walls = [s0 + th, s1 - th, th];
+  if (open !== null) {
+    hollow(X.B, mat, F, box, walls, [[y0 + th, y1]]);
+    F.box(X.B, mat, s0 + th, Math.max(open, y0 + th), depth - 0.06, s1 - th, y1, depth);
+    return;
+  }
+  if (!bays?.length) { F.box(X.B, mat, s0, y0, 0, s1, y1, depth); return; }
+  hollow(X.B, mat, F, box, walls, bays.map(([p, q]) => [p + (p - y0 < 1e-6 ? th : th / 2), q - (y1 - q < 1e-6 ? th : th / 2)]));
 }
 
-function base(X, F, s0, s1, cd, cTop, { count = doorCount(s1 - s0), drawer = false, falseFront = false, hingeLeft = true, open = null } = {}) {
-  const { B, cab } = X;
-  toeKick(X, F, s0, s1, cd);
-  carcass(X, F, cab, s0, s1, TOE, cTop, cd - 0.005, open);
-  let top = cTop;
-  if (drawer || falseFront) {
-    const y0 = cTop - 0.52;
-    F.box(B, cab, s0 + 0.012, y0, cd, s1 - 0.012, cTop - 0.012, cd + DOOR);
-    if (drawer) pullH(X, F, (s0 + s1) / 2, y0 + 0.26, Math.min(0.62, (s1 - s0) * 0.5), cd + DOOR);
-    top = y0;
+// The box [s0, s1] × [y0, y1] × [t0, t1] with open-fronted cavities across
+// [a, b] from `back` to its front, one per [lo, hi] in `spans` (bottom up).
+// From outside it is the same box.
+function hollow(B, mat, F, [s0, y0, t0, s1, y1, t1], [a, b, back], spans) {
+  if (back > t0 + 1e-6) F.box(B, mat, s0, y0, t0, s1, y1, back);
+  F.box(B, mat, s0, y0, back, a, y1, t1);
+  F.box(B, mat, b, y0, back, s1, y1, t1);
+  let y = y0;
+  for (const [lo, hi] of spans) {
+    if (lo > y + 1e-6) F.box(B, mat, a, y, back, b, lo, t1);
+    y = Math.max(y, hi);
   }
+  if (y1 > y + 1e-6) F.box(B, mat, a, y, back, b, y1, t1);
+}
+
+// Thin panels lining a cavity [a, b] × [lo, hi] from `back` to `front`, in
+// another material than the box around it (an oven's dark enamel).
+function liner(B, mat, F, a, lo, back, b, hi, front, th = 0.012) {
+  F.box(B, mat, a, lo, back, b, hi, back + th);
+  F.box(B, mat, a, lo, back, a + th, hi, front);
+  F.box(B, mat, b - th, lo, back, b, hi, front);
+  F.box(B, mat, a, lo, back, b, lo + th, front);
+  F.box(B, mat, a, hi - th, back, b, hi, front);
+}
+
+// A wire rack across [a, b] from t0 to t1 at height y; with `rim`, a basket
+// that tall (a dishwasher's).
+function rack(B, mat, F, a, b, t0, t1, y, rim = 0) {
+  const r = 0.012, n = Math.max(3, Math.round((b - a) / 0.2));
+  for (const yy of rim ? [y, y + rim] : [y]) {
+    for (const t of [t0, t1]) F.box(B, mat, a, yy - r, t - r, b, yy + r, t + r);
+    for (const s of [a, b]) F.box(B, mat, s - r, yy - r, t0, s + r, yy + r, t1);
+  }
+  for (let k = 1; k < n; k++) { const s = a + ((b - a) * k) / n; F.box(B, mat, s - r / 2, y - r / 2, t0, s + r / 2, y + r / 2, t1); }
+  if (rim) for (const s of [a, b]) for (const t of [t0, t1]) F.box(B, mat, s - r, y, t - r, s + r, y + rim, t + r);
+}
+
+// Shelves inside a compartment over [s0, s1] × [y0, y1] (its walls' outer
+// edges), set back a little from its front at `depth`.
+function innerShelves(X, F, mat, s0, s1, y0, y1, depth, n = Math.round((y1 - y0) / 1.3)) {
+  for (let k = 1; k <= n; k++) {
+    const y = y0 + ((y1 - y0) * k) / (n + 1);
+    F.box(X.B, mat, s0 + 0.05, y - 0.025, 0.05, s1 - 0.05, y + 0.025, depth - 0.08);
+  }
+}
+
+function base(X, F, s0, s1, cd, cTop, { count = doorCount(s1 - s0), drawer: drawers = false, falseFront = false, hingeLeft = true, open = null } = {}) {
+  const { B, cab } = X;
+  const top = drawers || falseFront ? cTop - 0.52 : cTop;
+  toeKick(X, F, s0, s1, cd);
+  carcass(X, F, cab, s0, s1, TOE, cTop, cd - 0.005, open !== null ? { open } : { bays: drawers ? [[TOE, top], [top, cTop]] : [[TOE, top]] });
+  if (drawers) drawer(X, F, cab, s0, s1, top, cTop - 0.012, cd, top + 0.26);
+  else if (falseFront) F.box(B, cab, s0 + 0.012, top, cd, s1 - 0.012, cTop - 0.012, cd + DOOR);
+  if (open === null) innerShelves(X, F, cab, s0, s1, TOE, top, cd, 1);
   doors(X, F, cab, s0, s1, TOE, top, cd, count, { hingeLeft });
 }
 
 function drawerStack(X, F, s0, s1, cd, cTop) {
-  const { B, cab } = X;
+  const { cab } = X;
   toeKick(X, F, s0, s1, cd);
-  F.box(B, cab, s0, TOE, 0, s1, cTop, cd - 0.005);
   const ys = [TOE, TOE + (cTop - 0.52 - TOE) / 2, cTop - 0.52, cTop];
+  carcass(X, F, cab, s0, s1, TOE, cTop, cd - 0.005, { bays: [0, 1, 2].map((k) => [ys[k], ys[k + 1]]) });
   for (let k = 0; k < 3; k++) {
     const y0 = ys[k], y1 = ys[k + 1];
-    F.box(B, cab, s0 + 0.012, y0 + 0.012, cd, s1 - 0.012, y1 - 0.012, cd + DOOR);
-    pullH(X, F, (s0 + s1) / 2, k === 2 ? (y0 + y1) / 2 : y1 - 0.24, Math.min(0.62, (s1 - s0) * 0.5), cd + DOOR);
+    drawer(X, F, cab, s0, s1, y0 + 0.012, y1 - 0.012, cd, k === 2 ? (y0 + y1) / 2 : y1 - 0.24);
   }
 }
 
 function upper(X, F, s0, s1, y0, y1, count, { depth = UPPER_D, hingeLeft = true } = {}) {
-  F.box(X.B, X.cab, s0, y0, 0, s1, y1, depth - 0.005);
+  carcass(X, F, X.cab, s0, s1, y0, y1, depth - 0.005, { bays: [[y0, y1]] });
+  innerShelves(X, F, X.cab, s0, s1, y0, y1, depth - 0.005, y1 - y0 > 2.4 ? 2 : 1);
   doors(X, F, X.cab, s0, s1, y0, y1, depth, count, { pullsAt: 'bottom', hingeLeft });
 }
 
@@ -221,24 +460,36 @@ function outlet(X, F, s, y, t) {
 
 function dishwasher(X, F, s0, s1, cd, cTop) {
   const { B, M } = X, { body, trim } = X.app;
-  F.box(B, M.toeKick, s0, 0, 0, s1, cTop, cd - 0.1);
-  F.box(B, body, s0 + 0.01, TOE - 0.05, cd - 0.1, s1 - 0.01, cTop - 0.012, cd + 0.02);
-  F.box(B, trim, s0 + 0.01, cTop - 0.22, cd + 0.02, s1 - 0.01, cTop - 0.012, cd + 0.04);
-  F.rodS(B, body, s0 + 0.18, s1 - 0.18, cTop - 0.36, cd + 0.16, 0.035);
-  for (const s of [s0 + 0.22, s1 - 0.22]) F.rodT(B, body, s, cTop - 0.36, cd + 0.02, cd + 0.16, 0.02);
+  // The tub, open behind the door: a stainless liner and two racks.
+  const a = s0 + 0.1, b = s1 - 0.1, lo = TOE + 0.05, hi = cTop - 0.1, back = 0.12, front = cd - 0.1;
+  hollow(B, M.toeKick, F, [s0, 0, 0, s1, cTop, front], [a, b, back], [[lo, hi]]);
+  liner(B, M.steelBrushed, F, a, lo, back, b, hi, front);
+  rack(B, M.vent, F, a + 0.04, b - 0.04, back + 0.06, front - 0.04, lo + 0.18, 0.3);
+  rack(B, M.vent, F, a + 0.04, b - 0.04, back + 0.06, front - 0.04, lo + (hi - lo) * 0.56, 0.24);
+  // The door drops open from its bottom edge.
+  const L = drop(X, mover(X, 'dishwasher'), F, TOE - 0.05, cd + 0.02);
+  L.part(body, s0 + 0.01, TOE - 0.05, cd - 0.1, s1 - 0.01, cTop - 0.012, cd + 0.02);
+  F.box(L.B, trim, s0 + 0.01, cTop - 0.22, cd + 0.02, s1 - 0.01, cTop - 0.012, cd + 0.04);
+  F.rodS(L.B, body, s0 + 0.18, s1 - 0.18, cTop - 0.36, cd + 0.16, 0.035);
+  for (const s of [s0 + 0.22, s1 - 0.22]) F.rodT(L.B, body, s, cTop - 0.36, cd + 0.02, cd + 0.16, 0.02);
   F.box(B, M.black, s0 + 0.05, 0.02, cd - TOE_IN - 0.02, s1 - 0.05, TOE - 0.05, cd - TOE_IN);
 }
 
 function range(X, F, s0, s1, cd, ct) {
   const { B, M } = X, { body, trim } = X.app, d = cd, c = (s0 + s1) / 2;
-  F.box(B, body, s0 + 0.01, 0.05, 0.1, s1 - 0.01, ct - 0.07, d + 0.1);
-  // Storage drawer, oven door with window and bar handle.
+  // The body, with the oven behind its door: dark enamel and two racks.
+  const a = s0 + 0.14, b = s1 - 0.14, lo = 0.74, hi = ct - 0.58, back = 0.35;
+  hollow(B, body, F, [s0 + 0.01, 0.05, 0.1, s1 - 0.01, ct - 0.07, d + 0.1], [a, b, back], [[lo, hi]]);
+  liner(B, M.black, F, a, lo, back, b, hi, d + 0.1);
+  for (const k of [0.3, 0.62]) rack(B, M.steelBrushed, F, a + 0.02, b - 0.02, back + 0.05, d, lo + (hi - lo) * k);
+  // Storage drawer, oven door with window and bar handle (it drops open).
   F.box(B, body, s0 + 0.02, 0.08, d + 0.1, s1 - 0.02, 0.6, d + 0.15);
   F.box(B, M.toeKick, s0 + 0.02, 0.0, d - 0.1, s1 - 0.02, 0.08, d + 0.1);
-  F.box(B, body, s0 + 0.02, 0.64, d + 0.1, s1 - 0.02, ct - 0.48, d + 0.16);
-  F.box(B, M.blackGlass, s0 + 0.32, 1.02, d + 0.16, s1 - 0.32, ct - 0.95, d + 0.165);
-  F.rodS(B, body, s0 + 0.2, s1 - 0.2, ct - 0.64, d + 0.3, 0.035);
-  for (const s of [s0 + 0.24, s1 - 0.24]) F.rodT(B, body, s, ct - 0.64, d + 0.16, d + 0.3, 0.02);
+  const L = drop(X, mover(X, 'oven'), F, 0.64, d + 0.16);
+  L.part(body, s0 + 0.02, 0.64, d + 0.1, s1 - 0.02, ct - 0.48, d + 0.16);
+  F.box(L.B, M.blackGlass, s0 + 0.32, 1.02, d + 0.16, s1 - 0.32, ct - 0.95, d + 0.165);
+  F.rodS(L.B, body, s0 + 0.2, s1 - 0.2, ct - 0.64, d + 0.3, 0.035);
+  for (const s of [s0 + 0.24, s1 - 0.24]) F.rodT(L.B, body, s, ct - 0.64, d + 0.16, d + 0.3, 0.02);
   // Front control strip with five knobs and a small display.
   F.box(B, trim, s0 + 0.02, ct - 0.42, d + 0.1, s1 - 0.02, ct - 0.07, d + 0.2);
   F.box(B, M.blackGlass, c - 0.25, ct - 0.34, d + 0.2, c + 0.25, ct - 0.15, d + 0.205);
@@ -271,10 +522,17 @@ function cooktop(X, F, s0, s1, cd, ct) {
 
 function microwave(X, F, s0, s1, y0) {
   const { B, M } = X, { body, trim } = X.app, h = 1.38, d = 1.3;
-  F.box(B, body, s0 + 0.01, y0, 0, s1 - 0.01, y0 + h, d);
-  F.box(B, M.blackGlass, s0 + 0.08, y0 + 0.12, d, s1 - 0.56, y0 + h - 0.12, d + 0.02);
+  // The body, with its cavity behind the door: a light liner and a turntable.
+  const a = s0 + 0.14, b = s1 - 0.62, lo = y0 + 0.16, hi = y0 + h - 0.16, back = 0.2;
+  hollow(B, body, F, [s0 + 0.01, y0, 0, s1 - 0.01, y0 + h, d], [a, b, back], [[lo, hi]]);
+  liner(B, M.appliance, F, a, lo, back, b, hi, d);
+  const [x, z] = F.p((a + b) / 2, (back + d) / 2);
+  B.cyl(M.porcelain, x, lo + 0.012, z, Math.min(b - a, d - back) * 0.42, 0.015, 32);
+  // The door (its window and handle) hinged on the left.
+  const L = swing(X, mover(X, 'microwave'), F, s0 + 0.08, d + 0.02, 1);
+  L.part(M.blackGlass, s0 + 0.08, y0 + 0.12, d, s1 - 0.56, y0 + h - 0.12, d + 0.02);
   F.box(B, M.blackGlass, s1 - 0.46, y0 + 0.3, d, s1 - 0.08, y0 + h - 0.15, d + 0.015);
-  F.box(B, body, s1 - 0.56, y0 + 0.2, d + 0.02, s1 - 0.5, y0 + h - 0.2, d + 0.12);
+  F.box(L.B, body, s1 - 0.56, y0 + 0.2, d + 0.02, s1 - 0.5, y0 + h - 0.2, d + 0.12);
   F.box(B, trim, s0 + 0.01, y0 - 0.03, 0.2, s1 - 0.01, y0, d - 0.05);
 }
 
@@ -301,52 +559,84 @@ function frustum(X, F, mat, lo, hi, y0, y1) {
   X.B.add(g, mat);
 }
 
-// Bottom-freezer refrigerator with French doors; `front` is where its doors end.
+// Bottom-freezer refrigerator with French doors over a freezer drawer; `front`
+// is where its doors end. Inside, a liner that glows while it's open.
 function fridge(X, F, s0, s1, H, front) {
   const { B, M } = X, { body, trim } = X.app, k = H / FRIDGE_H;
-  const f0 = s0 + 0.13, f1 = s1 - 0.13, split = f0 + (f1 - f0) * 0.42, door0 = front - 0.18;
-  F.box(B, trim, f0, 0.04, 0.15, f1, H, door0);
+  const f0 = s0 + 0.13, f1 = s1 - 0.13, split = f0 + (f1 - f0) * 0.42, door0 = front - 0.18, fz = 2.08 * k;
+  const a = f0 + 0.09, b = f1 - 0.09, back = 0.32, freezer = [0.36, fz - 0.06], fresh = [fz + 0.06, H - 0.12];
+  hollow(B, trim, F, [f0, 0.04, 0.15, f1, H, door0], [a, b, back], [freezer, fresh]);
   F.box(B, M.black, f0 + 0.02, 0.04, door0 - 0.14, f1 - 0.02, 0.25, door0 + 0.01);
-  F.box(B, body, f0, 0.27, door0, split - 0.012, H, front);
-  F.box(B, body, split + 0.012, 0.27, door0, f1, H, front);
+  F.box(B, M.black, f0, fz - 0.012, door0, f1, fz + 0.012, door0 + 0.01);
+  // French doors on their outer hinges.
+  const doorsM = mover(X, 'fridge');
+  const left = swing(X, doorsM, F, f0, front, 1), right = swing(X, doorsM, F, f1, front, -1);
+  left.part(body, f0, fz + 0.012, door0, split - 0.012, H, front);
+  right.part(body, split + 0.012, fz + 0.012, door0, f1, H, front);
+  seam(right, F, trim, split - 0.012, split + 0.012, fz + 0.012, H, door0);
   // Ice and water dispenser on the left door.
   const dc = (f0 + split) / 2, dw = Math.min(0.38, (split - f0) / 2 - 0.1);
-  F.box(B, M.blackGlass, dc - dw, 3.15 * k, front, dc + dw, 4.45 * k, front + 0.01);
-  F.box(B, M.black, dc - dw + 0.08, 3.25 * k, front - 0.06, dc + dw - 0.08, 3.95 * k, front + 0.01);
+  F.box(left.B, M.blackGlass, dc - dw, 3.15 * k, front, dc + dw, 4.45 * k, front + 0.01);
+  F.box(left.B, M.black, dc - dw + 0.08, 3.25 * k, front - 0.06, dc + dw - 0.08, 3.95 * k, front + 0.01);
   // Long bar handles either side of the seam.
-  for (const s of [split - 0.16, split + 0.16]) {
-    F.box(B, body, s - 0.03, 2.25 * k, front + 0.2, s + 0.03, 5.25 * k, front + 0.26);
-    F.rodT(B, body, s, 2.35 * k, front, front + 0.22, 0.025);
-    F.rodT(B, body, s, 5.15 * k, front, front + 0.22, 0.025);
+  for (const [L, s] of [[left, split - 0.16], [right, split + 0.16]]) {
+    F.box(L.B, body, s - 0.03, 2.25 * k, front + 0.2, s + 0.03, 5.25 * k, front + 0.26);
+    F.rodT(L.B, body, s, 2.35 * k, front, front + 0.22, 0.025);
+    F.rodT(L.B, body, s, 5.15 * k, front, front + 0.22, 0.025);
   }
+  // The freezer drawer, its bar handle and its basket.
+  const drawerM = mover(X, 'freezer'), D = slide(X, drawerM, F, fz / 2, front, Math.min(1.6, (door0 - back) * 0.75));
+  D.part(body, f0, 0.27, door0, f1, fz - 0.012, front);
+  F.box(D.B, body, f0 + 0.32, fz - 0.36, front + 0.2, f1 - 0.32, fz - 0.3, front + 0.26);
+  for (const s of [f0 + 0.42, f1 - 0.42]) F.rodT(D.B, body, s, fz - 0.33, front, front + 0.22, 0.025);
+  const ba = a + 0.04, bb = b - 0.04, lo = freezer[0] + 0.04, hi = freezer[1] - 0.12, bt = back + 0.08, w = 0.03;
+  F.box(D.B, trim, ba, lo, bt, bb, lo + w, door0);
+  F.box(D.B, trim, ba, lo, bt, ba + w, hi, door0);
+  F.box(D.B, trim, bb - w, lo, bt, bb, hi, door0);
+  F.box(D.B, trim, ba, lo, bt, bb, hi, bt + w);
+  D.reach(ba, lo, bt, bb, hi, door0);
+  // Lit liners, seen only while open: shelves and a crisper above, plain below.
+  const glow = cached(M, 'fridge:inside', () => std(0xf4f6f7, 0.45, { emissive: 0xf2f6ff, emissiveIntensity: 0.55 }));
+  const up = inside(X, doorsM), [y0, y1] = fresh;
+  liner(up, glow, F, a, y0, back, b, y1, door0);
+  for (const t of [0.36, 0.62, 0.84]) F.box(up, glow, a, y0 + (y1 - y0) * t - 0.015, back, b, y0 + (y1 - y0) * t + 0.015, door0 - 0.08);
+  F.box(up, glow, a, y0, door0 - 0.1, b, y0 + (y1 - y0) * 0.3, door0 - 0.07);
+  liner(inside(X, drawerM), glow, F, a, freezer[0], back, b, freezer[1], door0);
 }
 
-// Tall pantry cabinet: tall doors below, short ones above.
+// Tall pantry cabinet: tall doors below, short ones above, shelves behind them.
 function pantry(X, F, s0, s1, cd, H) {
-  const { B, cab } = X, split = Math.min(H - 0.8, Math.max(TOE + 1.5, H - 2.5));
+  const { cab } = X, split = Math.min(H - 0.8, Math.max(TOE + 1.5, H - 2.5));
   toeKick(X, F, s0, s1, cd);
-  F.box(B, cab, s0, TOE, 0, s1, H, cd - 0.005);
-  doors(X, F, cab, s0, s1, TOE, split, cd, doorCount(s1 - s0), { pullsAt: Math.min(split - 0.4, 3.5) });
-  doors(X, F, cab, s0, s1, split, H, cd, doorCount(s1 - s0), { pullsAt: 'bottom' });
+  carcass(X, F, cab, s0, s1, TOE, H, cd - 0.005, { bays: [[TOE, split], [split, H]] });
+  innerShelves(X, F, cab, s0, s1, TOE, split, cd - 0.005);
+  innerShelves(X, F, cab, s0, s1, split, H, cd - 0.005, 1);
+  doors(X, F, cab, s0, s1, TOE, split, cd, doorCount(s1 - s0), { pullsAt: Math.min(split - 0.4, 3.5), name: 'pantry' });
+  doors(X, F, cab, s0, s1, split, H, cd, doorCount(s1 - s0), { pullsAt: 'bottom', name: 'pantry' });
 }
 
 // Tall cabinet with a wall oven at eye height, drawers below and a door above.
 function wallOven(X, F, s0, s1, cd, H) {
-  const { B, M, cab } = X, { body, trim } = X.app, o0 = 2.55, o1 = Math.min(H - 0.7, 5.0), c = (s0 + s1) / 2;
+  const { B, M, cab } = X, { body, trim } = X.app, o0 = 2.55, o1 = Math.min(H - 0.7, 5.0);
+  const mid = (TOE + o0) / 2, top = H - o1 > 0.4;
   toeKick(X, F, s0, s1, cd);
-  F.box(B, cab, s0, TOE, 0, s1, H, cd - 0.005);
-  const mid = (TOE + o0) / 2;
-  for (const [y0, y1] of [[TOE, mid], [mid, o0]]) {
-    F.box(B, cab, s0 + 0.012, y0 + 0.012, cd, s1 - 0.012, y1 - 0.012, cd + DOOR);
-    pullH(X, F, c, y1 - 0.25, Math.min(0.62, (s1 - s0) * 0.5), cd + DOOR);
-  }
-  F.box(B, trim, s0 + 0.04, o0, cd - 0.1, s1 - 0.04, o1, cd + 0.06);
-  F.box(B, body, s0 + 0.06, o0 + 0.03, cd + 0.06, s1 - 0.06, o1 - 0.4, cd + 0.12);
-  F.box(B, M.blackGlass, s0 + 0.3, o0 + 0.35, cd + 0.12, s1 - 0.3, o1 - 0.85, cd + 0.125);
+  carcass(X, F, cab, s0, s1, TOE, H, cd - 0.005, { bays: [[TOE, mid], [mid, o0], [o0, o1], ...(top ? [[o1, H]] : [])] });
+  for (const [y0, y1] of [[TOE, mid], [mid, o0]]) drawer(X, F, cab, s0, s1, y0 + 0.012, y1 - 0.012, cd, y1 - 0.25);
+  // The oven: its frame, a dark cavity with racks, and a door that drops open.
+  const a = s0 + 0.16, b = s1 - 0.16, lo = o0 + 0.14, hi = o1 - 0.5;
+  hollow(B, trim, F, [s0 + 0.04, o0, cd - 0.1, s1 - 0.04, o1, cd + 0.06], [a, b, cd - 0.1], [[lo, hi]]);
+  liner(B, M.black, F, a, lo, 0.3, b, hi, cd + 0.06);
+  for (const k of [0.3, 0.62]) rack(B, M.steelBrushed, F, a + 0.02, b - 0.02, 0.35, cd, lo + (hi - lo) * k);
+  const L = drop(X, mover(X, 'oven'), F, o0 + 0.03, cd + 0.12);
+  L.part(body, s0 + 0.06, o0 + 0.03, cd + 0.06, s1 - 0.06, o1 - 0.4, cd + 0.12);
+  F.box(L.B, M.blackGlass, s0 + 0.3, o0 + 0.35, cd + 0.12, s1 - 0.3, o1 - 0.85, cd + 0.125);
   F.box(B, M.blackGlass, s0 + 0.06, o1 - 0.36, cd + 0.06, s1 - 0.06, o1 - 0.04, cd + 0.08);
-  F.rodS(B, body, s0 + 0.2, s1 - 0.2, o1 - 0.6, cd + 0.26, 0.035);
-  for (const s of [s0 + 0.24, s1 - 0.24]) F.rodT(B, body, s, o1 - 0.6, cd + 0.12, cd + 0.26, 0.02);
-  if (H - o1 > 0.4) doors(X, F, cab, s0, s1, o1, H, cd, doorCount(s1 - s0), { pullsAt: 'bottom' });
+  F.rodS(L.B, body, s0 + 0.2, s1 - 0.2, o1 - 0.6, cd + 0.26, 0.035);
+  for (const s of [s0 + 0.24, s1 - 0.24]) F.rodT(L.B, body, s, o1 - 0.6, cd + 0.12, cd + 0.26, 0.02);
+  if (top) {
+    innerShelves(X, F, cab, s0, s1, o1, H, cd - 0.005, 1);
+    doors(X, F, cab, s0, s1, o1, H, cd, doorCount(s1 - s0), { pullsAt: 'bottom' });
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -412,13 +702,14 @@ function run(X, F, r) {
       case 'corner': {
         // Blind corner: another run's cabinets cover the end it sits at.
         toeKick(X, F, s0, s1, cd);
-        F.box(B, X.cab, s0, TOE, 0, s1, cTop, cd);
         const blind = i === 0 ? 'left' : i === n - 1 ? 'right' : null;
-        if (!blind) doors(X, F, X.cab, s0, s1, TOE, cTop, cd, doorCount(w));
-        else if (w - r.d > 0.4) {
-          const [a, b] = blind === 'left' ? [s0 + r.d, s1] : [s0, s1 - r.d];
-          doors(X, F, X.cab, a, b, TOE, cTop, cd, doorCount(b - a), { hingeLeft: blind === 'left' });
-        }
+        const [a, b] = blind === 'left' ? [s0 + r.d, s1] : blind === 'right' ? [s0, s1 - r.d] : [s0, s1];
+        if (blind && w - r.d <= 0.4) { F.box(B, X.cab, s0, TOE, 0, s1, cTop, cd); break; }
+        if (a > s0) F.box(B, X.cab, s0, TOE, 0, a, cTop, cd);
+        if (b < s1) F.box(B, X.cab, b, TOE, 0, s1, cTop, cd);
+        carcass(X, F, X.cab, a, b, TOE, cTop, cd, { bays: [[TOE, cTop]] });
+        innerShelves(X, F, X.cab, a, b, TOE, cTop, cd, 1);
+        doors(X, F, X.cab, a, b, TOE, cTop, cd, doorCount(b - a), { hingeLeft: blind !== 'right' });
         break;
       }
       case 'end': {
@@ -601,24 +892,24 @@ function vanity(X, f, F) {
   const { B, M, hw, cab } = X, { w, d, h } = f, o = f.opts;
   const sinks = o.sinks === 2 && w / 2 >= 1.4 ? 2 : 1, sw = w / sinks, top = h - 0.12;
   F.box(B, M.toeKick, -w / 2 + 0.08, 0, 0, w / 2 - 0.08, 0.3, d - 0.2);
-  carcass(X, F, cab, -w / 2, w / 2, 0.3, top, d - 0.06, top - 0.46);
+  carcass(X, F, cab, -w / 2, w / 2, 0.3, top, d - 0.06, { open: top - 0.46 });
   const holes = [];
   for (let i = 0; i < sinks; i++) {
     const s0 = -w / 2 + i * sw, s1 = s0 + sw, c = (s0 + s1) / 2;
     F.box(B, cab, s0 + 0.01, top - 0.42, d - 0.06, s1 - 0.01, top - 0.01, d);
-    const pulls = [];
+    // Doors under the false front, hinged at the sides; each with its pull.
+    const m = mover(X, 'vanity'), leaves = [];
     if (sw > 1.6) {
-      F.box(B, cab, s0 + 0.01, 0.31, d - 0.06, c - 0.006, top - 0.44, d);
-      F.box(B, cab, c + 0.006, 0.31, d - 0.06, s1 - 0.01, top - 0.44, d);
-      pulls.push(c - 0.12, c + 0.12);
+      leaves.push([swing(X, m, F, s0 + 0.01, d, 1).part(cab, s0 + 0.01, 0.31, d - 0.06, c - 0.006, top - 0.44, d), c - 0.12]);
+      leaves.push([swing(X, m, F, s1 - 0.01, d, -1).part(cab, c + 0.006, 0.31, d - 0.06, s1 - 0.01, top - 0.44, d), c + 0.12]);
+      seam(leaves[1][0], F, cab, c - 0.006, c + 0.006, 0.31, top - 0.44, d - 0.06);
     } else {
-      F.box(B, cab, s0 + 0.01, 0.31, d - 0.06, s1 - 0.01, top - 0.44, d);
-      pulls.push(s1 - 0.14);
+      leaves.push([swing(X, m, F, s0 + 0.01, d, 1).part(cab, s0 + 0.01, 0.31, d - 0.06, s1 - 0.01, top - 0.44, d), s1 - 0.14]);
     }
-    for (const ps of pulls) {
-      F.box(B, hw, ps - 0.017, top - 1.2, d + 0.07, ps + 0.017, top - 0.7, d + 0.1);
-      F.box(B, hw, ps - 0.01, top - 1.15, d, ps + 0.01, top - 1.12, d + 0.07);
-      F.box(B, hw, ps - 0.01, top - 0.78, d, ps + 0.01, top - 0.75, d + 0.07);
+    for (const [L, ps] of leaves) {
+      F.box(L.B, hw, ps - 0.017, top - 1.2, d + 0.07, ps + 0.017, top - 0.7, d + 0.1);
+      F.box(L.B, hw, ps - 0.01, top - 1.15, d, ps + 0.01, top - 1.12, d + 0.07);
+      F.box(L.B, hw, ps - 0.01, top - 0.78, d, ps + 0.01, top - 0.75, d + 0.07);
     }
     // Bowl under an opening in the top, and the faucet behind it.
     const bw = Math.min(1.4, sw - 0.6), b0 = c - bw / 2, b1 = c + bw / 2, t0 = 0.45, t1 = d - 0.22, by = top - 0.45;
@@ -811,38 +1102,39 @@ function exhaustFan(X, x, z, y) {
 // ---------------------------------------------------------------------------
 // Laundry
 
-// One front-loading unit between y0 and y1: control strip and a round door.
-function frontLoader(X, F, w, d, y0, y1, dryer) {
-  const { B, M } = X, uh = y1 - y0, k = Math.min(uh / 3.23, w / 2);
+// One front-loading unit between y0 and y1: control strip and a round door
+// (its chrome ring and all) hinged at the ring's left edge, over the drum's
+// dark mouth.
+function frontLoader(X, F, w, d, y0, y1, dryer, name) {
+  const { B, M } = X, uh = y1 - y0, k = Math.min(uh / 3.23, w / 2), r = 0.66 * k;
   F.box(B, M.vent, -w / 2 + 0.02, y1 - 0.32 * k, d, w / 2 - 0.02, y1 - 0.04 * k, d + 0.02);
   F.box(B, M.blackGlass, w / 2 - 0.55 * k, y1 - 0.26 * k, d + 0.02, w / 2 - 0.12 * k, y1 - 0.1 * k, d + 0.025);
   const [x, z] = F.p(0, d), y = y0 + uh * 0.45;
-  const ring = new THREE.CylinderGeometry(0.66 * k, 0.66 * k, 0.06, 40);
-  ring.rotateX(Math.PI / 2); ring.translate(x, y, z + 0.03);
-  B.add(ring, M.steelBrushed);
-  const door = new THREE.CylinderGeometry(0.52 * k, 0.52 * k, 0.07, 40);
-  door.rotateX(Math.PI / 2); door.translate(x, y, z + 0.04);
-  B.add(door, dryer ? X.laundry : M.blackGlass);
-  if (dryer) {
-    const glass = new THREE.CylinderGeometry(0.36 * k, 0.36 * k, 0.075, 40);
-    glass.rotateX(Math.PI / 2); glass.translate(x, y, z + 0.04);
-    B.add(glass, M.blackGlass);
-  }
+  const disc = (rad, th, at, mat, batch) => {
+    const g = new THREE.CylinderGeometry(rad, rad, th, 40);
+    g.rotateX(Math.PI / 2); g.translate(x, y, z + at);
+    batch.add(g, mat);
+  };
+  disc(0.56 * k, 0.004, 0.002, M.black, B);
+  const L = swing(X, mover(X, name), F, -r, d + 0.075, 1).reach(-r, y - r, d, r, y + r, d + 0.075);
+  disc(r, 0.06, 0.03, M.steelBrushed, L.B);
+  disc(0.52 * k, 0.07, 0.04, dryer ? X.laundry : M.blackGlass, L.B);
+  if (dryer) disc(0.36 * k, 0.075, 0.04, M.blackGlass, L.B);
 }
 
 function washerDryer(X, f, F) {
   const { B, M } = X, { w, d, h } = f, mid = h / 2;
   F.box(B, X.laundry, -w / 2, 0.04, 0, w / 2, h, d);
   F.box(B, M.steelBrushed, -w / 2, mid - 0.02, d - 0.01, w / 2, mid + 0.02, d + 0.005);
-  frontLoader(X, F, w, d, 0.04, mid - 0.02, false);
-  frontLoader(X, F, w, d, mid + 0.02, h, false);
+  frontLoader(X, F, w, d, 0.04, mid - 0.02, false, 'washer');
+  frontLoader(X, F, w, d, mid + 0.02, h, false, 'dryer');
 }
 
 function laundryUnit(X, f, F) {
   const { w, d, h } = f;
   F.box(X.B, X.laundry, -w / 2, 0.04, 0, w / 2, h, d);
   F.box(X.B, X.M.black, -w / 2 + 0.05, 0, 0.1, w / 2 - 0.05, 0.04, d - 0.1);
-  frontLoader(X, F, w, d, 0.04, h, f.type === 'dryer');
+  frontLoader(X, F, w, d, 0.04, h, f.type === 'dryer', f.type === 'dryer' ? 'dryer' : 'washer');
 }
 
 function waterHeater(X, f, F) {
@@ -890,13 +1182,16 @@ function shelves(X, f, F) {
 function builtIn(X, f, F) {
   const { B, cab } = X, { w, d, h } = f, cd = d - DOOR, top = h - 0.06;
   toeKick(X, F, -w / 2, w / 2, cd);
-  F.box(B, cab, -w / 2, TOE, 0, w / 2, top, cd);
   F.box(B, cab, -w / 2, top, 0, w / 2, h, d + 0.03);
   const n = Math.max(1, Math.ceil(w / 3 - 0.01)), cw = w / n, split = h > 4.5 ? Math.min(3, h - 1) : null;
   for (let k = 0; k < n; k++) {
     const s0 = -w / 2 + k * cw, s1 = s0 + cw;
+    carcass(X, F, cab, s0, s1, TOE, top, cd, { bays: split ? [[TOE, split], [split, top]] : [[TOE, top]] });
+    innerShelves(X, F, cab, s0, s1, TOE, split ?? top, cd);
     doors(X, F, cab, s0, s1, TOE, split ?? top, cd, doorCount(cw));
-    if (split) doors(X, F, cab, s0, s1, split, top, cd, doorCount(cw), { pullsAt: 'bottom' });
+    if (!split) continue;
+    innerShelves(X, F, cab, s0, s1, split, top, cd, 1);
+    doors(X, F, cab, s0, s1, split, top, cd, doorCount(cw), { pullsAt: 'bottom' });
   }
 }
 
@@ -964,7 +1259,7 @@ export function buildFixtures(M, U) {
   const shared = {
     M, B, glass, soffit,
     counter: counterMat(M, fin.counters), app: applianceMats(M, fin.appliances), hw: hardwareMat(M, fin.hardware),
-    tile: tileMat(M, fin.tile), paint: paint(fin.walls ?? '#f2f1ee'),
+    tile: tileMat(M, fin.tile), paint: paint(fin.walls ?? '#f2f1ee'), movers: [],
   };
   shared.laundry = fin.appliances === 'black' ? shared.app.body : M.appliance;
   const batches = [B, glass, soffit];
@@ -972,7 +1267,7 @@ export function buildFixtures(M, U) {
     const build = BUILD[f.type];
     if (!build) continue;
     const room = U.roomById?.[f.room];
-    const X = { ...shared, cab: cabinetMat(M, f.color ?? fin.cabinets), ceiling: room?.ceiling ?? U.heights?.ceiling ?? 9 };
+    const X = { ...shared, cab: cabinetMat(M, f.color ?? fin.cabinets), ceiling: room?.ceiling ?? U.heights?.ceiling ?? 9, fixtureId: f.id };
     const m = new THREE.Matrix4().makeRotationY(-f.rot * DEG).setPosition(f.x, 0, f.z);
     batches.forEach((b) => b.push(m));
     // One odd fixture shouldn't take the rest of the unit down with it.
@@ -980,9 +1275,11 @@ export function buildFixtures(M, U) {
     batches.forEach((b) => { b.stack.length = 1; });
   }
   for (const r of U.rooms ?? []) if (r.kind === 'bath') exhaustFan(shared, r.at[0], r.at[1], r.ceiling);
-  const out = { solid: B.build(), glass: glass.build({ shadows: false }), soffit: soffit.build() };
+  const moving = buildMovers(shared.movers);
+  const out = { solid: B.build(), glass: glass.build({ shadows: false }), soffit: soffit.build(), movable: moving.group, movers: moving.movers };
   out.dispose = () => {
-    for (const g of [out.solid, out.glass, out.soffit]) g.traverse((o) => o.geometry?.dispose());
+    for (const g of [out.solid, out.glass, out.soffit, out.movable]) g.traverse((o) => o.geometry?.dispose());
+    moving.skeleton?.dispose();
   };
   return out;
 }

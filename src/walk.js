@@ -3,8 +3,10 @@ const wrap = (a) => ((a % 360) + 540) % 360 - 180;
 
 // First-person controls. With a mouse, a click locks the pointer and the mouse looks
 // around like a shooter (Esc frees it). On touch, or where the lock is refused, drag to
-// look and tap the floor to walk there. WASD / arrows / joystick move; E interacts
-// (opens and shuts doors). Yaw is a compass bearing (0 = plan north).
+// look and tap the floor to walk there. WASD / arrows / joystick move; E uses
+// what you face (a door, a drawer, a lamp: onInteract), and a tap or a click at
+// the crosshair uses what's there (pick() says { type: 'use', key }). Yaw is a
+// compass bearing (0 = plan north).
 export class WalkControls {
   #enabled = false;
   #overlay = null;
@@ -13,8 +15,8 @@ export class WalkControls {
   #lockByPromise = false;
   #pendingTap = null;
 
-  constructor(camera, dom, { isBlocked, pick, onTapDoor, onInteract, onUserMove, canLock = () => true, onLockChange }) {
-    Object.assign(this, { camera, dom, isBlocked, pick, onTapDoor, onInteract, onUserMove, canLock, onLockChange });
+  constructor(camera, dom, { isBlocked, pick, onUse, onInteract, onUserMove, canLock = () => true, onLockChange }) {
+    Object.assign(this, { camera, dom, isBlocked, pick, onUse, onInteract, onUserMove, canLock, onLockChange });
     this.x = 0; this.z = 0; this.y = 5.2; this.yaw = 0; this.pitch = 0; this.roll = 0;
     this.enabled = false;
     this.keys = new Set();
@@ -133,7 +135,7 @@ export class WalkControls {
 
   #tapAt(x, y) {
     const hit = this.pick(x, y);
-    if (hit?.type === 'door') this.onTapDoor?.(hit.id);
+    if (hit?.type === 'use') this.onUse?.(hit.key);
     else if (hit?.type === 'floor') {
       this.glide = { x: hit.point.x, z: hit.point.z };
       this.tween = null;
@@ -168,11 +170,11 @@ export class WalkControls {
     el.addEventListener('pointerdown', (e) => {
       if (!this.enabled) return;
       if (this.locked) {
-        // Locked: a click acts at the crosshair, and only on doors.
+        // Locked: a click uses what's at the crosshair, and does nothing else.
         if (e.button !== 0) return;
         const r = el.getBoundingClientRect();
         const hit = this.pick(r.left + r.width / 2, r.top + r.height / 2);
-        if (hit?.type === 'door') this.onTapDoor?.(hit.id);
+        if (hit?.type === 'use') this.onUse?.(hit.key);
         return;
       }
       if (drag) return;
@@ -295,7 +297,7 @@ function makeOverlay(parent) {
   cross.setAttribute('aria-hidden', 'true');
   const pill = document.createElement('div');
   pill.className = 'walk-lock-pill';
-  pill.innerHTML = '<kbd>E</kbd> doors &nbsp; <kbd>Esc</kbd> free the cursor';
+  pill.innerHTML = '<kbd>E</kbd> use &nbsp; <kbd>Esc</kbd> free the cursor';
   parent.append(cross, pill);
   return [cross, pill];
 }
