@@ -135,7 +135,9 @@ the unit between calls:
 | `pull`, `push` | Keep the work folder and the Artifact's database in step: the ArtifactData reads and versioned batch writes to make |
 
 **The Artifact.** Its page is `index.html` and `src/` as they are, with the
-page's outer shell trimmed (`skill/3d-living-space/scripts/app.mjs`); its first
+page's outer shell trimmed and three.js named by URL instead of through the
+import map, which browsers ignore once claude.ai's own scripts have loaded a
+module (`skill/3d-living-space/scripts/app.mjs`). Its first
 line tells `src/main.js` to load `src/claude-store.js` in place of
 `src/sync.js`. It paints at once from `unit.json`, a snapshot published beside
 it (all that visitors who aren't signed in see), then lives in the Artifact's
