@@ -47,8 +47,9 @@ export function singleFile(root, snapshot, { page, title } = {}) {
   }
   const body = page
     .replace(/<script type="importmap">[\s\S]*?<\/script>/, () => `<script type="importmap">${json({ imports })}</script>`)
-    .replace(/<script type="module" src="\.\/src\/main\.js"[^>]*><\/script>/, `<script type="module">import '${NAME}src/main.js';</script>`);
-  if (!body.includes(`import '${NAME}src/main.js'`)) throw new Error('index.html no longer loads ./src/main.js the way single.mjs expects.');
+    // The page starts the app with import('./src/main.js') (app.mjs START): here it's a bare name.
+    .replace("import('./src/main.js')", () => `import('${NAME}src/main.js')`);
+  if (!body.includes(`import('${NAME}src/main.js')`)) throw new Error('The page no longer starts ./src/main.js the way single.mjs expects.');
   return '<!doctype html><html lang="en"><head><meta charset="utf-8">'
     + '<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"></head><body>\n'
     + `<script>document.documentElement.classList.add('in-file'); window.LIVING_SPACE_SNAPSHOT = ${json(snapshot)}; window.LIVING_SPACE_TEXTURES = ${json(textures)}; window.LIVING_SPACE_PLANS = ${json(plans)};</script>\n`

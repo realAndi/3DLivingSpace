@@ -358,7 +358,7 @@ test('skill: the example ships its floor plan, nobody else\'s; a plan with the f
     const code = Buffer.from(map[`living-space/${rel}`].split(',')[1], 'base64').toString();
     assert.doesNotMatch(code, /from\s*['"]\.{1,2}\/|import\(\s*['"]\.{1,2}\//, rel);
   }
-  assert.ok(html.includes("import 'living-space/src/main.js'"));
+  assert.ok(html.includes("import('living-space/src/main.js')"));
 });
 
 test('skill: as a command: results on stdout, an error on stderr with exit 1, JSON and results on stdin', () => {

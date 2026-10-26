@@ -187,7 +187,10 @@ window.claude = Object.freeze({ use });
   function page(res, url, body) {
     let config;
     try { config = pageConfig(url); } catch (e) { return send(res, 400, e.message, 'text/plain; charset=utf-8'); }
-    send(res, 200, SKELETON_HEAD + mockScript(config) + SKELETON_BODY + body + SKELETON_END, TYPES['.html']);
+    // &premodule=1: a module loaded before the page's own scripts, as a viewer's
+    // runtime might, after which browsers may ignore the page's import map.
+    const pre = url.searchParams.get('premodule') === '1' ? '<script type="module">import(\'data:text/javascript,export default 1\');</script>' : '';
+    send(res, 200, SKELETON_HEAD + pre + mockScript(config) + SKELETON_BODY + body + SKELETON_END, TYPES['.html']);
   }
 
   function serveFile(res, base, rel) {
@@ -291,6 +294,11 @@ window.claude = Object.freeze({ use });
       if (!published.has(rel) && !PUBLISHED_TEXTURES.test(rel) && !unpublished.has(rel) && existsSync(join(root, rel))) {
         unpublished.add(rel);
         say(`! ${rel} is not one of the Artifact's files (it would 404 there)`);
+      }
+      // A module goes out as the Artifact ships it: three.js by absolute URL.
+      if (rel.startsWith('src/') && rel.endsWith('.js') && existsSync(join(root, rel))) {
+        const app = await fresh('skill/3d-living-space/scripts/app.mjs');
+        return send(res, 200, app.absoluteThree(readFileSync(join(root, rel), 'utf8'), app.threeBase(readFileSync(join(root, 'index.html'), 'utf8'))), TYPES['.js']);
       }
       return serveFile(res, root, rel);
     }
