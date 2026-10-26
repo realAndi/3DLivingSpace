@@ -186,6 +186,7 @@ test('pages and pictures', async () => {
   assert.deepEqual([old.status, old.headers.get('location')], [301, `/3DLivingSpace/u/${u.id}`]);
 
   assert.equal((await fetch(`${B}/src/unit.js`)).headers.get('content-type'), 'text/javascript; charset=utf-8');
+  assert.equal((await fetch(`${B}/assets/tex/512/marble-color.webp`)).headers.get('content-type'), 'image/webp');
   assert.equal((await fetch(`${B}/src/../server/index.js`)).status, 404);
 
   const empty = await create();

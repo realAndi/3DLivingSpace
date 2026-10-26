@@ -45,6 +45,7 @@ who can look around and make their own version.
 - **Tape measure** in every view: along the floor in Plan, between any two
   surfaces (heights too) in Dollhouse and Walk.
 - **Units:** Feet & inches, Inches, or Centimeters (Tools tab), per browser.
+- **Textures:** Auto picks a lighter set on phones; Tools can set Low or High, per browser.
 - **Share.** The unit's link (`/u/<id>`) is view-only for everyone else, with a
   *Make your own version* button that copies it. Your browser keeps the edit key
   of the units it made; the edit link (`/u/<id>#edit=<key>`) works on any device.
@@ -155,7 +156,8 @@ fixes the origin used in links.
 | `src/furniture.js`, `src/layout.js` | 3D furniture and custom pieces; placing, dragging, clearances |
 | `src/sync.js` | Opening, creating, copying and saving units; live updates |
 | `src/measure.js`, `src/walk.js`, `src/units.js` | Tape measure, first-person controls, display units |
-| `src/materials.js`, `src/surroundings.js` | Textures, the view out the windows |
+| `src/materials.js`, `src/textures.js`, `assets/tex/` | Materials with color, normal and roughness maps: finishes drawn in code, and CC0 scans of fabric, leather, carpet, walnut, marble and concrete (sources in `assets/tex/SOURCES.md`), loaded when first used at a quality that suits the device |
+| `src/surroundings.js` | The view out the windows |
 | `server/` | HTTP server, units API, per-unit MCP servers, plan pictures (`render.js`, IBM Plex fonts under the OFL) |
 
 ## Deploying
