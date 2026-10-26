@@ -76,6 +76,14 @@ body {
 /* Owner-only things (MCP URL, edit link) and visitor-only things. */
 body:not([data-role="owner"]) [data-owner] { display: none !important; }
 body:not([data-role="viewer"]) [data-visitor] { display: none !important; }
+/* As a claude.ai Artifact (src/claude-store.js; the page's first line sets
+   .in-claude before these apply), some things are only the site's and some
+   only the Artifact's, and your own version is a place of its own. */
+.in-claude [data-site] { display: none !important; }
+html:not(.in-claude) [data-artifact] { display: none !important; }
+body:not([data-role="version"]) [data-version] { display: none !important; }
+/* The page keeps clear of the screen's safe areas itself (--safe-t, --safe-b). */
+html.in-claude { padding: 0; }
 button { font: inherit; color: inherit; }
 a { color: inherit; }
 :focus-visible { outline: 2px solid var(--oak); outline-offset: 2px; }
@@ -811,9 +819,11 @@ h1 a:hover { color: var(--oak); }
         <section id="tab-rooms" role="tabpanel" aria-labelledby="t-rooms">
           <div class="group empty-panel" id="emptyPanel" hidden>
             <h2 class="big">Nothing built yet</h2>
-            <p data-owner>Claude builds this unit through its own MCP URL. Then furnish it here, or ask Claude to.</p>
-            <p data-visitor>Its owner hasn't built it yet. It shows up here as soon as they do.</p>
-            <ol class="steps" data-owner>
+            <p data-owner data-site>Claude builds this unit through its own MCP URL. Then furnish it here, or ask Claude to.</p>
+            <p data-owner data-artifact>Ask Claude to build it: share your floor plan and photos in the conversation that made this page. Then furnish it here, or ask Claude to.</p>
+            <p data-visitor data-site>Its owner hasn't built it yet. It shows up here as soon as they do.</p>
+            <p data-visitor data-artifact>It shows up here as soon as Claude builds it.</p>
+            <ol class="steps" data-owner data-site>
               <li>Add the unit's MCP URL as a custom connector in Claude: Settings, Connectors, Add custom connector.
                 <div class="link-row"><input class="mcp-url" type="text" readonly aria-label="This unit's MCP URL"><button class="btn" data-copy="mcp">Copy</button></div>
                 <p class="warn-note" style="margin:8px 0 0">Anyone with this URL can change this unit. Only add it to your own Claude.</p></li>
@@ -821,8 +831,9 @@ h1 a:hover { color: var(--oak); }
               <li>Ask Claude to build it.
                 <div><button class="btn primary" data-copy="prompt-build">Copy the prompt</button></div></li>
             </ol>
+            <div class="btn-row" data-owner data-artifact><button class="btn primary" data-copy="prompt-build">Copy the prompt</button></div>
             <p class="live-note" data-owner><span class="pulse"></span>It appears here live while Claude builds.</p>
-            <div class="btn-row" data-visitor><button class="btn primary" data-go="create">Create your own unit</button></div>
+            <div class="btn-row" data-visitor data-site><button class="btn primary" data-go="create">Create your own unit</button></div>
           </div>
           <ul class="rooms" id="roomList"></ul>
           <p class="section-note" id="roomsNote"></p>
@@ -846,10 +857,16 @@ h1 a:hover { color: var(--oak); }
               <p class="status" id="sgStatus" role="status"></p>
             </div>
           </div>
+          <!-- As an Artifact: your own version, and the way back. -->
+          <div class="group notice" id="versionNotice" data-artifact hidden>
+            <p id="versionText"></p>
+            <p class="status" id="versionStatus" role="status"></p>
+            <button class="btn" data-go="original">See the original</button>
+          </div>
           <div class="group" id="offerGroup" hidden>
             <h2>Suggest your changes</h2>
             <p class="section-note flush" id="offerTo"></p>
-            <label class="field wide"><span>Your name</span><input id="offerName" type="text" maxlength="40" autocomplete="off" placeholder="So they know who it's from"></label>
+            <label class="field wide" data-site><span>Your name</span><input id="offerName" type="text" maxlength="40" autocomplete="off" placeholder="So they know who it's from"></label>
             <label class="field wide"><span>Note</span><textarea id="offerNote" maxlength="200" rows="2" placeholder="What you changed, and why (optional)"></textarea></label>
             <div class="btn-row">
               <button class="btn primary" id="offerSend">Send suggestion</button>
@@ -913,7 +930,7 @@ h1 a:hover { color: var(--oak); }
             <p id="shareNoticeText">This unit is view only. Make your own version to furnish it your way.</p>
             <button class="btn primary" data-go="fork">Make your own version</button>
           </div>
-          <div class="group" data-visitor id="unlockGroup">
+          <div class="group" data-visitor data-site id="unlockGroup">
             <h2>Is it yours?</h2>
             <p class="section-note flush">Enter the edit code you set in its Share tab on your other device, and edit it here too.</p>
             <form class="link-row" id="unlockForm"><input class="code-input" id="unlockCode" type="text" maxlength="80" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="Edit code" aria-label="Edit code"><button class="btn primary" type="submit">Unlock</button></form>
@@ -925,13 +942,24 @@ h1 a:hover { color: var(--oak); }
             <label class="field wide"><span>Your name (optional)</span><input id="designAuthor" type="text" maxlength="40" placeholder="Shown as “by …”" autocomplete="off"></label>
             <p class="status" id="saveStatus" role="status"></p>
           </div>
-          <div class="group" id="shareGroup">
+          <div class="group" data-artifact>
+            <h2>Share</h2>
+            <p class="section-note flush">Share this page from the Share menu at the top of the Artifact in Claude. What people can do depends on their access:</p>
+            <ul class="notes">
+              <li><b>Editors</b> furnish it. Everyone sees their changes.</li>
+              <li><b>Contributors</b> make their own version and suggest it.</li>
+              <li><b>Viewers</b> and people with a public link look around.</li>
+              <li><b>Signed-out visitors</b> see the layout as Claude last published it.</li>
+            </ul>
+            <p class="section-note flush" data-version style="margin:12px 0 0">Sharing this page shares the original. Your version stays yours.</p>
+          </div>
+          <div class="group" id="shareGroup" data-site>
             <h2>Share</h2>
             <img class="card-preview" id="cardPreview" alt="How the link looks when you share it" width="1200" height="630">
             <div class="link-row"><input id="viewLink" type="text" readonly aria-label="Link to this unit"><button class="btn primary" id="copyView">Share</button></div>
             <p class="section-note flush">Anyone with this link can look around and make their own version. They can't change yours.</p>
           </div>
-          <div class="group" data-owner id="codeGroup">
+          <div class="group" data-owner data-site id="codeGroup">
             <h2>Edit on your other devices</h2>
             <p class="section-note flush" id="codeNote">Set an edit code. Then on your phone or another computer, open this unit's link, tap Edit and enter it.</p>
             <form class="link-row" id="codeForm"><input class="code-input" id="codeInput" type="text" maxlength="80" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="At least 6 letters or digits" aria-label="Edit code"><button class="btn" type="button" id="codeSuggest">Suggest</button></form>
@@ -944,14 +972,15 @@ h1 a:hover { color: var(--oak); }
           </div>
           <div class="group" data-owner>
             <h2>Build and furnish with Claude</h2>
-            <p class="section-note flush">This unit has its own MCP URL. Add it to Claude as a custom connector (Settings, Connectors, Add custom connector), then ask Claude to build or furnish it. Changes show up here within seconds.</p>
-            <div class="link-row"><input class="mcp-url" type="text" readonly aria-label="This unit's MCP URL"><button class="btn" data-copy="mcp">Copy</button></div>
-            <p class="warn-note">Anyone with this URL can change this unit. Only add it to your own Claude.</p>
+            <p class="section-note flush" data-site>This unit has its own MCP URL. Add it to Claude as a custom connector (Settings, Connectors, Add custom connector), then ask Claude to build or furnish it. Changes show up here within seconds.</p>
+            <div class="link-row" data-site><input class="mcp-url" type="text" readonly aria-label="This unit's MCP URL"><button class="btn" data-copy="mcp">Copy</button></div>
+            <p class="warn-note" data-site>Anyone with this URL can change this unit. Only add it to your own Claude.</p>
+            <p class="section-note flush" data-artifact>Ask Claude in the conversation that made this page. Changes show up here within seconds.</p>
             <h3>Starter prompts</h3>
             <div class="prompt"><b>Build it from your plan and photos</b><small id="buildPromptText"></small><button class="btn" data-copy="prompt-build">Copy</button></div>
             <div class="prompt"><b>Furnish it</b><small id="furnishPromptText"></small><button class="btn" data-copy="prompt-furnish">Copy</button></div>
           </div>
-          <div class="group">
+          <div class="group" data-site>
             <h2>Your units</h2>
             <ul class="layout-list unit-list" id="myUnits"></ul>
             <p class="section-note flush" id="myUnitsEmpty">Units you make in this browser show up here.</p>
@@ -1058,9 +1087,10 @@ h1 a:hover { color: var(--oak); }
       </div>
     </div>
     <div class="view-chip" id="viewChip" hidden>
-      <span class="tag">View only</span>
+      <span class="tag" id="viewChipTag">View only</span>
       <span id="viewChipText"></span>
-      <button class="btn" id="chipEdit" title="It's yours? Enter its edit code">Edit</button>
+      <button class="btn" id="chipEdit" data-site title="It's yours? Enter its edit code">Edit</button>
+      <button class="btn" data-go="original" data-artifact hidden>See the original</button>
       <button class="btn primary" data-go="fork">Make your own</button>
     </div>
     <div class="tape-bar" id="tapeBar" hidden>
@@ -1090,19 +1120,26 @@ h1 a:hover { color: var(--oak); }
         </svg>
         <div class="card-eyebrow"><span>Empty unit</span></div>
         <h2>Nothing built yet</h2>
-        <p data-owner>Build it with Claude from your floor plan and photos: rooms, doors, windows, kitchen and baths, all to scale.</p>
-        <p data-visitor>Its owner hasn't built it yet. It shows up here as soon as they do.</p>
-        <ol class="mini-steps" data-owner>
+        <p data-owner data-site>Build it with Claude from your floor plan and photos: rooms, doors, windows, kitchen and baths, all to scale.</p>
+        <p data-owner data-artifact>Ask Claude to build it from your floor plan and photos: rooms, doors, windows, kitchen and baths, all to scale.</p>
+        <p data-visitor data-site>Its owner hasn't built it yet. It shows up here as soon as they do.</p>
+        <p data-visitor data-artifact>It shows up here as soon as Claude builds it.</p>
+        <ol class="mini-steps" data-owner data-site>
           <li>Add this unit's MCP URL to Claude as a custom connector: Settings, Connectors, Add custom connector.</li>
           <li>Share your floor plan and photos in a chat.</li>
           <li>Ask Claude to build it.</li>
         </ol>
-        <div class="btn-row" data-owner>
+        <ol class="mini-steps" data-owner data-artifact>
+          <li>Share your floor plan and photos in the conversation that made this page.</li>
+          <li>Ask Claude to build it.</li>
+        </ol>
+        <div class="btn-row" data-owner data-site>
           <button class="btn primary" data-copy="mcp">Copy MCP URL</button>
           <button class="btn" data-copy="prompt-build">Copy the prompt</button>
         </div>
+        <div class="btn-row" data-owner data-artifact><button class="btn primary" data-copy="prompt-build">Copy the prompt</button></div>
         <p class="live-note" data-owner><span class="pulse"></span>It appears here live while Claude builds.</p>
-        <div class="btn-row" data-visitor><button class="btn primary" data-go="create">Create your own unit</button><button class="btn" data-go="home">See the example</button></div>
+        <div class="btn-row" data-visitor data-site><button class="btn primary" data-go="create">Create your own unit</button><button class="btn" data-go="home">See the example</button></div>
       </div>
     </div>
     <div class="stage-card" id="stageNotice" hidden>
