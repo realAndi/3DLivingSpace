@@ -272,7 +272,7 @@ export class UnitSession {
   // A copy's own suggestion: { to: { id, title, author } | null, status:
   // 'none' | 'open' | 'applied' | 'dismissed', note, changes, sentAt }.
   mySuggestion() { return this.#call('suggestion'); }
-  async suggest(note = '') { await this.flush(); return this.#call('suggest', { method: 'POST', body: { note } }); }
+  async suggest(note = '') { await this.settle(); return this.#call('suggest', { method: 'POST', body: { note } }); }
   withdrawSuggestion() { return this.#call('suggestion', { method: 'DELETE' }); }
 
   // The suggestions waiting for this unit: [{ id, from, author, title, note,
@@ -284,7 +284,7 @@ export class UnitSession {
 
   // Take changes (layoutChanges group ids, or 'all'): { applied } or { error }.
   async applySuggestion(sid, groups = 'all') {
-    await this.flush();
+    await this.settle();
     const out = await this.#call(`suggestions/${sid}/apply`, { method: 'POST', body: { groups } });
     if (out.design) { this.#remote(out.design); this.#emit(); }
     return out;
@@ -320,6 +320,15 @@ export class UnitSession {
   }
 
   #hasPending(p = this.pending) { return p.upsert.size > 0 || p.remove.size > 0 || !!p.info; }
+
+  // Wait until every edit made so far is saved (or saving it failed): flush()
+  // alone returns at once while a save is already on its way.
+  async settle() {
+    for (let i = 0; i < 150 && this.editable && (this.saving || this.#hasPending()) && this.status !== 'error'; i++) {
+      if (!this.saving) await this.flush();
+      else await new Promise((r) => setTimeout(r, 100));
+    }
+  }
 
   async flush() {
     clearTimeout(this.timer);

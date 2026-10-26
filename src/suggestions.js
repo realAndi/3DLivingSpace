@@ -220,6 +220,7 @@ export function createSuggestions(opts) {
   let view = null;          // the one previewed: { s, groups, chosen: Set of group ids, after }
   let busy = false;         // applying or dismissing
   let sending = false;
+  let offerError = null;    // why the last send or withdraw failed
   let noteEdited = false;   // the note field has words not yet sent
   let mode = 'dollhouse';
   let lastStatus = null, mineTimer = 0;
@@ -616,6 +617,7 @@ export function createSuggestions(opts) {
     ui.send.textContent = !changes ? 'No changes yet' : st === 'open' ? 'Send again' : 'Send suggestion';
     ui.withdraw.hidden = st !== 'open';
     const them = to.author || 'They';
+    if (offerError) { offerStatus(offerError, true); return; }
     offerStatus(sending ? 'Sending…'
       : st === 'open' ? `Sent ${plural(mine.sent ?? changes, 'change')}. Waiting for them.${mine.sent != null && changes !== mine.sent ? ' You\'ve changed more since: send again to update it.' : ' Send again to update it.'}`
         : st === 'applied' ? `${them} applied your suggestion.${changes ? ' Send again to suggest more.' : ''}`
@@ -626,6 +628,7 @@ export function createSuggestions(opts) {
   async function send() {
     if (sending || !mine?.changes) return;
     sending = true;
+    offerError = null;
     renderOffer();
     // A name typed just now goes with it.
     clearTimeout(nameTimer);
@@ -634,7 +637,8 @@ export function createSuggestions(opts) {
     if (name !== session.author) session.setInfo({ author: name });
     const out = await session.suggest(ui.offerNote.value.trim());
     sending = false;
-    if (out.error) { renderOffer(); offerStatus(out.error, true); return; }
+    // Kept on screen until the next try, through the refreshes that follow.
+    if (out.error) { offerError = out.error; renderOffer(); return; }
     mine = out;
     noteEdited = false;
     renderOffer();
@@ -642,8 +646,9 @@ export function createSuggestions(opts) {
   }
 
   async function withdraw() {
+    offerError = null;
     const out = await session.withdrawSuggestion();
-    if (out.error) { offerStatus(out.error, true); return; }
+    if (out.error) { offerError = out.error; renderOffer(); return; }
     mine = out;
     noteEdited = false;
     renderOffer();
