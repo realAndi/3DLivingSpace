@@ -50,14 +50,24 @@ export function descendants(uid, items) {
   return out;
 }
 
-// The piece's support and its descendants: what it may touch or pass through
-// without colliding (a vase on a bookshelf's middle shelf is inside the
-// bookshelf's one solid box).
-export function relatives(item, items) {
-  const out = new Set(descendants(item.uid, items).map((i) => i.uid));
-  const up = onPiece(item);
-  if (up) out.add(up);
+// What holds the piece up, and what holds that up, and so on.
+export function ancestors(item, items) {
+  const out = [];
+  let at = item;
+  while (onPiece(at) && out.length < items.length) {
+    const up = items.find((i) => i.uid === onPiece(at));
+    if (!up || up === item || out.includes(up)) break;
+    out.push(up);
+    at = up;
+  }
   return out;
+}
+
+// The pieces under and over this one: what it may touch or pass through
+// without colliding (a vase on a bookshelf's middle shelf is inside the
+// bookshelf's one solid box, and so are the books under the vase).
+export function relatives(item, items) {
+  return new Set([...descendants(item.uid, items), ...ancestors(item, items)].map((i) => i.uid));
 }
 
 // ---------------------------------------------------------------------------

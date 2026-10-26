@@ -99,7 +99,7 @@ export function problems(item, others = [], U = null, assets = null) {
     for (const d of U.doorSwings) if (parts.some((p) => p.y0 < (d.head ?? 99) - 0.04 && overlap(p.poly, d.poly, 0.1))) out.push(`blocks the ${d.name.toLowerCase()} from opening`);
     const near = relatives(item, others);
     for (const o of others) {
-      if (o === item || o.uid === item.uid || isFlat(o) || near.has(o.uid) || relatives(o, others).has(item.uid)) continue;
+      if (o === item || o.uid === item.uid || isFlat(o) || near.has(o.uid)) continue;
       const ob = pieceBody(o, assets).box;
       if (o.x + ob[0] >= box[2] || o.x + ob[2] <= box[0] || o.z + ob[1] >= box[3] || o.z + ob[3] <= box[1]) continue;
       if (meets(parts, pieceParts(o, assets))) out.push(`overlaps ${o.name}${o.uid ? ` (${o.uid})` : ''}`);
