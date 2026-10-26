@@ -35,11 +35,11 @@ function spanAt(poly, axis, c) {
 // standing piece, along that axis. Measured between the outlines, so a turned
 // piece's corner counts, not its bounding box. Each side: { side, axis, sign,
 // edge, at, dist }: the gap runs from (edge, at) for dist along the axis.
-export function clearances(item, others = [], obstacles = []) {
+export function clearances(item, others = [], obstacles = [], assets = null) {
   const poly = footprint(item), b = polyBounds(poly), square = item.rot % 90 === 0;
   const obs = [
     ...obstacles.map((r) => ({ poly: rectPoly(r), b: r, square: true })),
-    ...others.filter((o) => o !== item && o.uid !== item.uid && !isFlat(o) && onFloor(o))
+    ...others.filter((o) => o !== item && o.uid !== item.uid && !isFlat(o, assets) && onFloor(o))
       .map((o) => { const op = footprint(o); return { poly: op, b: polyBounds(op), square: o.rot % 90 === 0 }; }),
   ];
   const sides = [
@@ -94,7 +94,7 @@ export function problems(item, others = [], U = null, assets = null) {
     if (s.kind === 'trim' || !meets(parts, [s])) continue;
     out.push(s.kind === 'wall' ? 'runs into a wall' : `overlaps the ${s.name.toLowerCase()}`);
   }
-  if (!isFlat(item)) {
+  if (!isFlat(item, assets)) {
     // A door's swing reaches up to its head; art above a door doesn't block it.
     for (const d of U.doorSwings) if (parts.some((p) => p.y0 < (d.head ?? 99) - 0.04 && overlap(p.poly, d.poly, 0.1))) out.push(`blocks the ${d.name.toLowerCase()} from opening`);
     // Nor may anything stand in a doorway, under its head.
@@ -104,7 +104,7 @@ export function problems(item, others = [], U = null, assets = null) {
     }
     const near = relatives(item, others);
     for (const o of others) {
-      if (o === item || o.uid === item.uid || isFlat(o) || near.has(o.uid)) continue;
+      if (o === item || o.uid === item.uid || isFlat(o, assets) || near.has(o.uid)) continue;
       const ob = pieceBody(o, assets).box;
       if (o.x + ob[0] >= box[2] || o.x + ob[2] <= box[0] || o.z + ob[1] >= box[3] || o.z + ob[3] <= box[1]) continue;
       if (meets(parts, pieceParts(o, assets))) out.push(`overlaps ${o.name}${o.uid ? ` (${o.uid})` : ''}`);
@@ -169,7 +169,7 @@ export function findSpots({ w, d, h = 3, room = null, againstWall = true, items 
           if (againstWall) {
             const [fx, fz] = frontOf(rot);
             const back = fx > 0.5 ? 'west' : fx < -0.5 ? 'east' : fz > 0.5 ? 'north' : 'south';
-            const c = clearances(cand, items, againstObstacles).find((s) => s.side === back);
+            const c = clearances(cand, items, againstObstacles, assets).find((s) => s.side === back);
             if (!c || c.dist > 3) continue;
             if (c.axis === 0) cand.x += c.dist * c.sign; else cand.z += c.dist * c.sign;
           }
@@ -268,11 +268,11 @@ export function collisionShapes(U) {
 export function blockersFor(item, U, items = [], assets = null) {
   const body = pieceBody(item, assets), top = body.y1 - 1e-3, bottom = body.y0 + 1e-3;
   const own = collisionShapes(U).filter((s) => s.y0 < top && s.y1 > bottom);
-  if (isFlat(item)) return own;
+  if (isFlat(item, assets)) return own;
   const out = [...own];
   const near = relatives(item, items);
   for (const o of items) {
-    if (o.uid === item.uid || isFlat(o) || near.has(o.uid)) continue;
+    if (o.uid === item.uid || isFlat(o, assets) || near.has(o.uid)) continue;
     for (const p of pieceParts(o, assets)) if (p.y0 < top && p.y1 > bottom) out.push({ ...p, kind: 'piece', uid: o.uid });
   }
   return out;
@@ -401,7 +401,7 @@ export function slideOnWall(item, tx, tz, U, shapes, assets = null) {
 // edge is the wall's face, so a sofa placed there sinks into the baseboard) is
 // eased out, up to 3". Other pieces are left alone: chairs may tuck under tables.
 export function settleOffWalls(item, U, assets = null) {
-  if (!U || isFlat(item)) return null;
+  if (!U || isFlat(item, assets)) return null;
   const body = pieceBody(item, assets), top = body.y1 - 1e-3, bottom = body.y0 + 1e-3;
   const shapes = collisionShapes(U).filter((s) => (s.kind === 'wall' || s.kind === 'trim') && s.y0 < top && s.y1 > bottom);
   if (!collides(item, shapes, assets)) return null;

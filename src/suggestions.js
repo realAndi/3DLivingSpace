@@ -238,6 +238,7 @@ export function createSuggestions(opts) {
   const edgeMat = new THREE.MeshBasicMaterial({ color: 0x000000, opacity: 0.4, toneMapped: false, transparent: true, depthTest: false, depthWrite: false });
   let outline = null;
   let standing = [];        // the pieces standing in the preview, for walking into
+  let standingAssets = {};  // and their custom pieces, by id
 
   const changesOf = (s) => layoutChanges({ base: s.base, theirs: s.items, ours: layout.items });
 
@@ -305,6 +306,7 @@ export function createSuggestions(opts) {
       if (real && g.userData.setState) real.userData.setState?.(real.userData.state);
     }
     standing = plan.items;
+    standingAssets = A;
     drawOutline(plan.items.filter((i) => plan.marked.has(i.uid)));
     invalidate();
   }
@@ -721,7 +723,7 @@ export function createSuggestions(opts) {
 
     // Walking: is (x, z) within r of a preview piece you'd walk into?
     blocks(x, z, r) {
-      return !!view && root.visible && standing.some((i) => !isFlat(i) && (i.y ?? 0) < WALK_UNDER && nearPiece(i, x, z, r));
+      return !!view && root.visible && standing.some((i) => !isFlat(i, standingAssets) && (i.y ?? 0) < WALK_UNDER && nearPiece(i, x, z, r));
     },
   };
 }

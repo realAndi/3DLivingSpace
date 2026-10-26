@@ -325,7 +325,7 @@ export class LayoutEditor {
   // Walk-mode collision: is (x, z) within r of a piece you'd walk into? Rugs,
   // and what hangs high enough to walk under (art, pendants, fans), don't count.
   blocks(x, z, r) {
-    return this.items.some((i) => !isFlat(i) && (i.y ?? 0) < WALK_UNDER && nearPiece(i, x, z, r));
+    return this.items.some((i) => !isFlat(i, this.assets) && (i.y ?? 0) < WALK_UNDER && nearPiece(i, x, z, r));
   }
 
   // The view changed ('dollhouse', 'plan' or 'walk'). Seen from above in
@@ -445,7 +445,7 @@ export class LayoutEditor {
     this.guides = [];
     const item = this.current;
     if (!item || !this.root.visible || this.readOnly || !onFloor(item)) { this.invalidate(); return; }
-    for (const c of clearances(item, this.items, this.obstacles())) {
+    for (const c of clearances(item, this.items, this.obstacles(), this.assets)) {
       if (c.dist < 0.04) continue;
       const a = c.axis === 0 ? [c.edge, c.at] : [c.at, c.edge];
       const b = c.axis === 0 ? [c.edge + c.dist * c.sign, c.at] : [c.at, c.edge + c.dist * c.sign];
@@ -582,7 +582,7 @@ export class LayoutEditor {
   // Slide flush against a wall or counter when it is within 4".
   #snapToWalls(item) {
     if (item.rot % 90 !== 0) return;
-    for (const c of clearances(item, this.items, this.obstacles())) {
+    for (const c of clearances(item, this.items, this.obstacles(), this.assets)) {
       if (c.dist > 0.001 && c.dist < 0.34) {
         if (c.axis === 0) item.x += c.dist * c.sign; else item.z += c.dist * c.sign;
       }
@@ -1304,7 +1304,8 @@ export class LayoutEditor {
     if (document.activeElement !== ui.h) ui.h.value = toInput(item.h);
     if (document.activeElement !== ui.rot) ui.rot.value = String(Math.round(item.rot));
     if (document.activeElement !== ui.y) ui.y.value = toInput(item.y ?? 0);
-    ui.h.disabled = isFlat(item);
+    // A catalog rug is as thick as a rug; a custom piece keeps its height.
+    ui.h.disabled = catalogByType[item.type]?.build === 'rug';
     // A wall piece turns with its wall, and has a height off the floor; a
     // piece on a top says what it's on and can come down to the floor.
     ui.rot.disabled = hold === 'wall';

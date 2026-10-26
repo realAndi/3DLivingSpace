@@ -655,7 +655,7 @@ Parts are in inches in the piece's own frame: +x to the piece's right as you fac
         description: z.string().max(LIMITS.description).optional().describe('What it is, in a sentence.'),
         asset_id: z.string().optional().describe('Replace this existing asset instead of making a new one.'),
         placement: z.enum(PLACES).optional().describe('Where it goes: floor (default), surface (on tables, counters, shelves), wall (hangs on a wall) or ceiling (hangs from the ceiling).'),
-        kind: z.enum(KINDS.map((k) => k.key)).optional().describe('What it is, for the catalog (default furniture).'),
+        kind: z.enum(KINDS.map((k) => k.key)).optional().describe('What it is, for the catalog (default furniture). A rug or mat is kind rug: it lies flat, so people walk over it and other pieces stand on it (so does any floor piece an inch tall or less).'),
         light_at: z.array(z.number()).length(3).optional().describe('A lamp: [x, y, z] inches of its bulb, in the same frame as the parts.'),
         parts: z.array(z.object({
           shape: z.enum(SHAPES).describe('box, cylinder, cone (its tip points up) or sphere.'),
@@ -711,7 +711,7 @@ Parts are in inches in the piece's own frame: +x to the piece's right as you fac
       const pieces = items.map((it) => ({
         id: it.uid, name: it.name, room: U.roomAt(it.x, it.z)?.id ?? null,
         on: it.on ? it.on.replace(/^[pf]:/, '') : 'floor', ...(it.y ? { elevation: inch(it.y) } : {}),
-        clear_floor: isFlat(it) || !onFloor(it) ? null : Object.fromEntries(clearances(it, items, U.obstacles).map((c) => [c.side, inch(c.dist)])),
+        clear_floor: isFlat(it, row.doc.assets) || !onFloor(it) ? null : Object.fromEntries(clearances(it, items, U.obstacles, row.doc.assets).map((c) => [c.side, inch(c.dist)])),
         problems: problems(it, items, U, row.doc.assets),
       }));
       return ok({ unit_problems: U.problems, pieces, pieces_with_problems: pieces.filter((p) => p.problems.length).length });
