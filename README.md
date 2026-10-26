@@ -63,6 +63,11 @@ who can look around and make their own version.
 - **Share.** The unit's link (`/u/<id>`) is view-only for everyone else, with a
   *Make your own version* button that copies it. Your browser keeps the edit key
   of the units it made; the edit link (`/u/<id>#edit=<key>`) works on any device.
+  Or set an **edit code** in Share (your own, or a suggested one like
+  `k7qm-4x2p`): on another device, open the unit's link, tap **Edit** and enter
+  it, and that browser can edit it too. Case, spaces and dashes don't matter.
+  The server keeps the edit key encrypted with the code and never the code
+  itself; guesses are limited per address and per unit.
 
 ## The MCP tools
 
@@ -154,6 +159,8 @@ fixes the origin used in links.
 | `GET api/units/:id` | Anyone; `?since=<version>` answers 204 when unchanged; `example` is the example |
 | `PATCH api/units/:id` | `X-Edit-Key`: furniture, title and author (the unit itself changes over MCP) |
 | `POST api/units/:id/fork` | A copy you own |
+| `GET`, `PUT`, `DELETE api/units/:id/code` | `X-Edit-Key`: whether an edit code is set; set one (`{code}`); remove it |
+| `POST api/units/:id/unlock` | `{code}`: the unit with its key, as if you'd made it (8 tries per address per 15 minutes, 40 per unit per hour) |
 | `GET api/units/:id/card.png`, `plan.png`, `api/card.png` | Link preview, labeled plan |
 
 ## Layout

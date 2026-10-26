@@ -25,6 +25,8 @@ const limiters = {
   write: new RateLimiter(1500, 10 * 60 * 1000),  // saves and agent edits, per 10 minutes
   read: new RateLimiter(1200, 60 * 1000),        // views, polling and pictures, per minute
   mcp: new RateLimiter(900, 10 * 60 * 1000),
+  unlock: new RateLimiter(8, 15 * 60 * 1000),      // edit code guesses per address, per 15 minutes
+  unlockUnit: new RateLimiter(40, 60 * 60 * 1000), // and per unit, from anywhere, per hour
 };
 const handlers = [createApi(config, units, limiters), createMcp(config, units, limiters), createPages(config, units)];
 

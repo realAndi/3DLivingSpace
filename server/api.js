@@ -5,6 +5,8 @@
 //   PATCH api/units/:id           X-Edit-Key: furniture, custom pieces, title, author (never the unit);
 //                                 with baseVersion, the unit comes back if others wrote since
 //   POST  api/units/:id/fork      anyone: a copy that you own
+//   GET / PUT / DELETE api/units/:id/code   X-Edit-Key: whether an edit code is set; set { code }; remove it
+//   POST  api/units/:id/unlock    { code } → the unit with its key, as if you owned it (rate-limited)
 //   GET   api/units/:id/card.png  link-preview picture (1200 × 630)
 //   GET   api/units/:id/plan.png  labeled plan, as the MCP server draws it
 //   GET   api/card.png            the home page's preview: the example unit
@@ -79,6 +81,24 @@ export function createApi(config, units, limiters) {
       const { title, author } = await body(ctx);
       const { row, key } = units.fork(id, { title, author });
       json(ctx.res, 201, owned(row, key, origin));
+      return true;
+    }
+    // The edit code: the owner sets it, another device trades it for the key.
+    if (parts.length === 3 && parts[2] === 'code' && ['GET', 'PUT', 'DELETE'].includes(method)) {
+      limit(limiters.write, ctx.ip, 'changes');
+      const key = typeof ctx.req.headers['x-edit-key'] === 'string' ? ctx.req.headers['x-edit-key'] : '';
+      const set = method === 'GET' ? units.hasCode(id, key)
+        : await units.setCode(id, key, method === 'DELETE' ? null : (await body(ctx)).code ?? '');
+      json(ctx.res, 200, { set });
+      return true;
+    }
+    if (parts.length === 3 && parts[2] === 'unlock' && method === 'POST') {
+      // Few guesses per address, and few per unit from everywhere.
+      limit(limiters.unlock, ctx.ip, 'code attempts');
+      limit(limiters.unlockUnit, id, 'code attempts for this unit');
+      const { code } = await body(ctx);
+      const { row, key } = await units.unlock(id, typeof code === 'string' ? code : '');
+      json(ctx.res, 200, owned(row, key, origin));
       return true;
     }
     if (parts.length === 3 && (parts[2] === 'card.png' || parts[2] === 'plan.png') && read) {

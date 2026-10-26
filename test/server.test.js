@@ -422,3 +422,45 @@ test('MCP: an agent decorates: lamps on tables, art on walls, a pendant, the cou
   const onDresser = (await call('place_items', { items: [{ type: lamp.place_as, at: [143, 85] }] })).data.placed[0];
   assert.deepEqual([onDresser.on, onDresser.elevation], ['dresser', 32]);
 });
+
+test('edit codes: the owner sets one, another device trades it for the key; guessing is limited', async () => {
+  const u = await create({ title: 'Code test' });
+  const code = (method, body, key) => api(`api/units/${u.id}/code`, { method, body, key });
+  const unlock = (c, id = u.id) => api(`api/units/${id}/unlock`, { method: 'POST', body: { code: c } });
+
+  assert.equal((await code('GET', null, 'x'.repeat(28))).status, 403, 'only the key sees whether a code is set');
+  assert.deepEqual(await (await code('GET', null, u.key)).json(), { set: false });
+  assert.equal((await unlock('anything1')).status, 403, 'no code set yet');
+  assert.equal((await code('PUT', { code: 'ab-1' }, u.key)).status, 400, 'too short');
+  assert.equal((await code('PUT', { code: 'Maple River 42' }, 'x'.repeat(28))).status, 403);
+  assert.deepEqual(await (await code('PUT', { code: 'Maple River 42' }, u.key)).json(), { set: true });
+  assert.deepEqual(await (await code('GET', null, u.key)).json(), { set: true });
+  // The code never comes back from a read.
+  assert.equal(JSON.stringify(await (await api(`api/units/${u.id}`)).json()).includes('code'), false);
+
+  const wrong = await unlock('maple river 41');
+  assert.equal(wrong.status, 403);
+  assert.match((await wrong.json()).error, /Share tab/);
+  // Case, spaces and dashes don't matter: a phone capitalizes.
+  const right = await unlock('maple-river-42');
+  assert.equal(right.status, 200);
+  const got = await right.json();
+  assert.deepEqual([got.id, got.key, got.mcpUrl], [u.id, u.key, u.mcpUrl]);
+  assert.equal((await api(`api/units/${u.id}`, { method: 'PATCH', key: got.key, body: { title: 'From my phone' } })).status, 200);
+  assert.equal((await unlock('maple-river-42', 'example')).status, 403, 'the example has no code');
+
+  // A new code replaces the old; removing it closes the door.
+  await code('PUT', { code: 'k7qm-4x2p' }, u.key);
+  assert.equal((await unlock('maple river 42')).status, 403);
+  assert.equal((await unlock('K7QM4X2P')).status, 200);
+  assert.deepEqual(await (await code('DELETE', null, u.key)).json(), { set: false });
+  assert.equal((await unlock('k7qm-4x2p')).status, 403);
+  // A copy doesn't carry the code.
+  const copy = await (await api(`api/units/${u.id}/fork`, { method: 'POST', body: {} })).json();
+  assert.equal((await unlock('k7qm-4x2p', copy.id)).status, 403);
+
+  // Eight tries per address in fifteen minutes; then wait.
+  let status = 0;
+  for (let i = 0; i < 3 && status !== 429; i++) status = (await unlock(`guess${i}xx`)).status;
+  assert.equal(status, 429);
+});

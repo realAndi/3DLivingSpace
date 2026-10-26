@@ -323,6 +323,8 @@ h1 a:hover { color: var(--oak); }
 .tape-bar .btn, .view-chip .btn { padding: 7px 12px; flex: none; }
 .view-chip { top: calc(max(16px, var(--safe-t)) + 56px); }
 .view-chip span:empty { display: none; }
+/* With Edit there too, a phone has no room left for the unit's name (it's in the sheet). */
+@media (max-width: 479px) { .view-chip.with-edit #viewChipText { display: none; } }
 .view-chip .tag { flex: none; font: 500 10px/1 var(--font-mono); letter-spacing: .06em; text-transform: uppercase; color: var(--ink-2); border: 1px solid var(--rule); border-radius: 4px; padding: 3px 5px; }
 .stage.measuring .piece-bar, .stage.measuring .hint { display: none; }
 .icon-btn svg { width: 18px; height: 18px; }
@@ -427,7 +429,11 @@ h1 a:hover { color: var(--oak); }
 .prompt b { font-size: 13.5px; }
 .prompt small { grid-column: 1; font-size: 12px; color: var(--ink-2); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .prompt .btn { grid-column: 2; grid-row: 1 / span 2; padding: 7px 12px; }
+#editGroup { margin-top: 14px; }
 #editGroup .btn { margin-bottom: 8px; }
+/* Edit codes are typed on phones: 16px keeps iOS from zooming in on focus. */
+.link-row input.code-input { font: 500 16px/1 var(--font-mono); letter-spacing: .04em; }
+#codeGroup .btn-row { margin-bottom: 2px; }
 
 /* ---------- Furniture ---------- */
 .tab .count { font: 500 10.5px/1 var(--font-mono); color: var(--oak); margin-left: 2px; }
@@ -790,6 +796,12 @@ h1 a:hover { color: var(--oak); }
             <p id="shareNoticeText">This unit is view only. Make your own version to furnish it your way.</p>
             <button class="btn primary" data-go="fork">Make your own version</button>
           </div>
+          <div class="group" data-visitor id="unlockGroup">
+            <h2>Is it yours?</h2>
+            <p class="section-note flush">Enter the edit code you set in its Share tab on your other device, and edit it here too.</p>
+            <form class="link-row" id="unlockForm"><input class="code-input" id="unlockCode" type="text" maxlength="80" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="Edit code" aria-label="Edit code"><button class="btn primary" type="submit">Unlock</button></form>
+            <p class="status" id="unlockStatus" role="status"></p>
+          </div>
           <div class="group" data-owner>
             <h2>This unit</h2>
             <label class="field wide"><span>Name</span><input id="designTitle" type="text" maxlength="60" placeholder="e.g. Our place, Sunday light" autocomplete="off"></label>
@@ -801,9 +813,16 @@ h1 a:hover { color: var(--oak); }
             <img class="card-preview" id="cardPreview" alt="How the link looks when you share it" width="1200" height="630">
             <div class="link-row"><input id="viewLink" type="text" readonly aria-label="Link to this unit"><button class="btn primary" id="copyView">Share</button></div>
             <p class="section-note flush">Anyone with this link can look around and make their own version. They can't change yours.</p>
-            <div id="editGroup" data-owner>
+          </div>
+          <div class="group" data-owner id="codeGroup">
+            <h2>Edit on your other devices</h2>
+            <p class="section-note flush" id="codeNote">Set an edit code. Then on your phone or another computer, open this unit's link, tap Edit and enter it.</p>
+            <form class="link-row" id="codeForm"><input class="code-input" id="codeInput" type="text" maxlength="80" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="At least 6 letters or digits" aria-label="Edit code"><button class="btn" type="button" id="codeSuggest">Suggest</button></form>
+            <div class="btn-row"><button class="btn primary" type="submit" form="codeForm" id="codeSave">Save code</button><button class="btn" id="codeRemove" hidden>Remove code</button></div>
+            <p class="status" id="codeStatus" role="status"></p>
+            <div id="editGroup">
               <button class="btn" data-copy="edit">Copy edit link</button>
-              <p class="section-note flush">The edit link lets you keep working on this unit on another device. Keep it private.</p>
+              <p class="section-note flush">Or open the edit link on the other device: it needs no code. Keep the code and the link private.</p>
             </div>
           </div>
           <div class="group" data-owner>
@@ -924,6 +943,7 @@ h1 a:hover { color: var(--oak); }
     <div class="view-chip" id="viewChip" hidden>
       <span class="tag">View only</span>
       <span id="viewChipText"></span>
+      <button class="btn" id="chipEdit" title="It's yours? Enter its edit code">Edit</button>
       <button class="btn primary" data-go="fork">Make your own</button>
     </div>
     <div class="tape-bar" id="tapeBar" hidden>

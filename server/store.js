@@ -1,6 +1,7 @@
 // Units in SQLite (node:sqlite, built into Node 24). One row per unit; the unit
 // spec, its furniture and its custom assets are one JSON document in the row:
-// { unit, unitRev, items, assets }.
+// { unit, unitRev, items, assets }. `code` holds the edit key locked with the
+// owner's edit code, when they set one.
 import { DatabaseSync } from 'node:sqlite';
 import { existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
@@ -25,6 +26,8 @@ export class Store {
         updated_at INTEGER NOT NULL
       );
     `);
+    // The edit code (see Units.setCode), added after the first units.
+    if (!this.db.prepare('PRAGMA table_info(units)').all().some((c) => c.name === 'code')) this.db.exec('ALTER TABLE units ADD COLUMN code TEXT');
     this.q = {
       insert: this.db.prepare(`INSERT OR IGNORE INTO units (id, key_hash, title, author, doc, version, forked_from, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`),
@@ -33,6 +36,8 @@ export class Store {
       update: this.db.prepare(`UPDATE units SET title = ?, author = ?, doc = ?, version = version + 1, updated_at = ?
         WHERE id = ? AND version = ?`),
       count: this.db.prepare('SELECT COUNT(*) AS n FROM units'),
+      // Not part of the document: setting it doesn't change the unit's version.
+      setCode: this.db.prepare('UPDATE units SET code = ? WHERE id = ?'),
     };
   }
 
@@ -51,6 +56,8 @@ export class Store {
   }
 
   count() { return this.q.count.get().n; }
+
+  setCode(id, code) { this.q.setCode.run(code, id); }
 
   // Designs saved before units existed (designs.db) were furniture placed in
   // the one apartment, which is now the example unit. Bring them over once,

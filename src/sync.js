@@ -3,6 +3,9 @@
 // is what makes a unit yours: with its key you can furnish it and get its MCP
 // address, without one it opens view-only and offers to make your own version.
 //
+// An owner can also set an edit code: on another device, with only the unit's
+// link, the code unlocks the key (unlock()), and that browser keeps it too.
+//
 // Furniture edits go up as pieces added, changed or removed, a moment after the
 // last one, and the open unit is polled every few seconds, so Claude building
 // or furnishing it through MCP (or another tab) shows up without a reload. The
@@ -203,6 +206,52 @@ export class UnitSession {
     this.#reset();
     this.#adopt(doc, doc.key, { push: true });
     return doc;
+  }
+
+  // The edit code. hasCode(): true or false, or null when it can't tell.
+  // setCode(code) sets it (null removes it); it returns null, or why not.
+  async hasCode() {
+    if (!this.editable) return null;
+    try {
+      const res = await fetch(`api/units/${this.id}/code`, { headers: { 'X-Edit-Key': this.key }, cache: 'no-store' });
+      return res.ok ? (await res.json()).set : null;
+    } catch { return null; }
+  }
+
+  async setCode(code) {
+    if (!this.editable) return 'Only the owner can set an edit code.';
+    let res;
+    try {
+      res = await fetch(`api/units/${this.id}/code`, {
+        method: code === null ? 'DELETE' : 'PUT', headers: { 'Content-Type': 'application/json', 'X-Edit-Key': this.key },
+        body: code === null ? undefined : JSON.stringify({ code }),
+      });
+    } catch { return 'Can\'t reach the server. Try again.'; }
+    return res.ok ? null : (await res.json().catch(() => ({}))).error ?? 'That didn\'t work. Try again.';
+  }
+
+  // Trade the unit's edit code for its key: this browser owns it from now on.
+  // Returns null, or why not.
+  async unlock(code) {
+    if (!this.id || this.role !== 'viewer' || this.busy) return null;
+    const id = this.id;
+    this.busy = true;
+    this.#emit();
+    try {
+      let res;
+      try {
+        res = await fetch(`api/units/${encodeURIComponent(id)}/unlock`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code }) });
+      } catch { return 'Can\'t reach the server. Try again.'; }
+      if (!res.ok) return (await res.json().catch(() => ({}))).error ?? 'That didn\'t work. Try again.';
+      const doc = await res.json();
+      if (this.id !== id) return null;
+      this.#reset();
+      this.#adopt(doc, doc.key);
+      return null;
+    } finally {
+      this.busy = false;
+      this.#emit();
+    }
   }
 
   // Changes from the furniture editor: { upsert: [items], remove: [uids] }.

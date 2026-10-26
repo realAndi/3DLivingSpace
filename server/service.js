@@ -5,13 +5,25 @@
 // Only a hash of the key is stored. Anyone may view a unit or make their own
 // copy of it; only the key changes it. The example unit is not stored: it is
 // built from src/example.js and can be viewed and copied but never changed.
-import { createHash, timingSafeEqual } from 'node:crypto';
+//
+// An owner may also set an edit code, a password for their other devices: on
+// one, with only the unit's link, the code unlocks the edit key. The key is
+// kept encrypted with the code (scrypt, then AES-256-GCM); the code itself is
+// never stored, and a code that decrypts the key is the right one.
+import { createHash, timingSafeEqual, randomBytes, scrypt, createCipheriv, createDecipheriv } from 'node:crypto';
+import { promisify } from 'node:util';
 import { cleanAsset, cleanDesign, cleanItem, randomId, LIMITS } from '../src/design.js';
 import { cleanUnit, emptyUnit, buildUnit } from '../src/unit.js';
 import { EXAMPLE_UNIT, EXAMPLE_TITLE } from '../src/example.js';
 import { AppError } from './http.js';
 
 const hash = (key) => createHash('sha256').update(key).digest('hex');
+const derive = promisify(scrypt);
+const SCRYPT = { N: 16384, r: 8, p: 1 };
+
+// Edit codes are typed on phones: case, spaces, dashes and dots don't matter.
+export const normalizeCode = (s) => String(s ?? '').normalize('NFKC').toLowerCase().replace(/[\s._-]+/g, '');
+const WRONG_CODE = 'That code doesn\'t open this unit. Its owner sets the edit code in the Share tab.';
 export const ID_RE = /^[A-Za-z0-9]{8,16}$/;
 export const KEY_RE = /^[A-Za-z0-9]{20,48}$/;
 export const EXAMPLE_ID = 'example';
@@ -72,6 +84,42 @@ export class Units {
   canEdit(row, key) {
     if (!row.key_hash || !KEY_RE.test(key ?? '')) return false;
     return timingSafeEqual(Buffer.from(hash(key)), Buffer.from(row.key_hash));
+  }
+
+  // Lock the edit key with a new edit code, or (code null) remove the code.
+  async setCode(id, key, code) {
+    const row = this.requireEdit(id, key);
+    if (code === null) { this.store.setCode(row.id, null); return false; }
+    const c = normalizeCode(code);
+    if (c.length < 6) throw new AppError(400, 'An edit code needs at least 6 letters or digits.');
+    if (c.length > 64) throw new AppError(400, 'An edit code can be at most 64 letters or digits.');
+    const salt = randomBytes(16), iv = randomBytes(12);
+    const cipher = createCipheriv('aes-256-gcm', await derive(c, salt, 32, SCRYPT), iv);
+    const data = Buffer.concat([cipher.update(key, 'utf8'), cipher.final()]);
+    const b64 = (b) => b.toString('base64');
+    this.store.setCode(row.id, JSON.stringify({ v: 1, salt: b64(salt), iv: b64(iv), data: b64(data), tag: b64(cipher.getAuthTag()) }));
+    return true;
+  }
+
+  hasCode(id, key) { return !!this.requireEdit(id, key).code; }
+
+  // The edit key, for the right code: { row, key }. A wrong code, a unit
+  // without one and the example all answer the same.
+  async unlock(id, code) {
+    const row = this.get(id);
+    const c = normalizeCode(code);
+    if (!row.code || !c || c.length > 64) throw new AppError(403, WRONG_CODE);
+    let key;
+    try {
+      const lock = JSON.parse(row.code), b = (s) => Buffer.from(s, 'base64');
+      const decipher = createDecipheriv('aes-256-gcm', await derive(c, b(lock.salt), 32, SCRYPT), b(lock.iv));
+      decipher.setAuthTag(b(lock.tag));
+      key = Buffer.concat([decipher.update(b(lock.data)), decipher.final()]).toString('utf8');
+    } catch {
+      throw new AppError(403, WRONG_CODE);
+    }
+    if (!this.canEdit(row, key)) throw new AppError(403, WRONG_CODE);
+    return { row, key };
   }
 
   requireEdit(id, key) {

@@ -708,6 +708,7 @@ function renderUnitInfo() {
   $('#cutLabel').textContent = `Cut walls at ${fmtLen(4.5)}`;
 }
 
+let codeFor = null;  // the unit whose edit code state the Share tab shows
 function renderSession(ss) {
   const role = ss.role, home = role === 'home', mine = role === 'owner', visitor = role === 'viewer';
   document.body.dataset.role = role;
@@ -771,6 +772,13 @@ function renderSession(ss) {
   }
   const mcp = ss.mcpUrl() ?? '';
   $$('.mcp-url').forEach((i) => { i.value = mcp; });
+  // The edit code: visitors to a unit (not the example) can unlock it; its
+  // owner sees whether a code is set.
+  $('#chipEdit').hidden = ss.isExample;
+  ui.chip.classList.toggle('with-edit', !ss.isExample);
+  $('#unlockGroup').hidden = ss.isExample;
+  if (mine && codeFor !== ss.id) { codeFor = ss.id; renderCode(null); ss.hasCode().then((set) => { if (codeFor === ss.id) renderCode(set); }); }
+  if (!mine) codeFor = null;
 
   // Your units, here and on the home page
   const list = ss.ownedUnits();
@@ -833,6 +841,68 @@ document.addEventListener('click', async (e) => {
   } else if (session.error) layout.toast(session.error);
 });
 $('#homeLink').addEventListener('click', (e) => { e.preventDefault(); if (session.role !== 'home') session.home({ push: true }); });
+
+// ---------------------------------------------------------------------------
+// Edit codes: set one here, then on another device open the unit's link, tap
+// Edit and enter it (src/sync.js unlock, server/service.js).
+function renderCode(set) {
+  $('#codeRemove').hidden = !set;
+  $('#codeSave').textContent = set ? 'Save new code' : 'Save code';
+  $('#codeNote').textContent = set
+    ? 'A code is set. On your phone or another computer, open this unit\'s link, tap Edit and enter it. Saving a new code replaces it.'
+    : 'Set an edit code. Then on your phone or another computer, open this unit\'s link, tap Edit and enter it. Make it hard to guess, or tap Suggest.';
+}
+function codeStatus(el, text, error = false) {
+  el.textContent = text;
+  el.dataset.state = error ? 'error' : '';
+}
+// Eight letters and digits that can't be misread (no 0/o, 1/l/i).
+function suggestCode() {
+  const A = 'abcdefghjkmnpqrstuvwxyz23456789', s = [...crypto.getRandomValues(new Uint8Array(8))].map((v) => A[v % A.length]).join('');
+  return `${s.slice(0, 4)}-${s.slice(4)}`;
+}
+$('#codeSuggest').addEventListener('click', () => {
+  const input = $('#codeInput');
+  input.value = suggestCode();
+  input.focus();
+  input.select();
+  codeStatus($('#codeStatus'), '');
+});
+$('#codeForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const input = $('#codeInput'), code = input.value.trim();
+  if (!code) { input.focus(); return; }
+  codeStatus($('#codeStatus'), 'Saving…');
+  const err = await session.setCode(code);
+  if (err) { codeStatus($('#codeStatus'), err, true); return; }
+  renderCode(true);
+  codeStatus($('#codeStatus'), `Saved. On your other device, open this unit's link, tap Edit and enter ${code}.`);
+});
+$('#codeRemove').addEventListener('click', async () => {
+  const err = await session.setCode(null);
+  if (err) { codeStatus($('#codeStatus'), err, true); return; }
+  renderCode(false);
+  $('#codeInput').value = '';
+  codeStatus($('#codeStatus'), 'Removed. No code opens this unit now.');
+});
+$('#chipEdit').addEventListener('click', () => {
+  openTab('t-share');
+  const input = $('#unlockCode');
+  input.scrollIntoView({ block: 'center' });
+  input.focus();
+});
+$('#unlockForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const input = $('#unlockCode'), code = input.value.trim();
+  if (!code) { input.focus(); return; }
+  codeStatus($('#unlockStatus'), 'Checking…');
+  const err = await session.unlock(code);
+  if (err) { codeStatus($('#unlockStatus'), err, true); return; }
+  input.value = '';
+  codeStatus($('#unlockStatus'), '');
+  input.blur();
+  layout.toast('It\'s yours on this device too. Changes save as you go.');
+});
 
 async function copy(text, done) {
   if (!text) return;
