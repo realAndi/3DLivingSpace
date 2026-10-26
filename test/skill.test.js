@@ -244,7 +244,9 @@ test('skill: bundle, push and pull keep the Artifact\'s files and database in st
   const again = await w.ok(['bundle']);
   assert.deepEqual([again.publish.url, again.publish.icon], [URL, undefined]);
   const snap = await w.ok(['bundle', '--snapshot-only']);
-  assert.deepEqual(snap.publish, { url: URL, root, files: [{ path: 'unit.json' }] });
+  // The Artifact tool takes a page with every publish: the same one goes along.
+  assert.deepEqual(snap.publish, { url: URL, file_path: join(root, 'index.html'), root, files: [{ path: 'unit.json' }] });
+  assert.match(readFileSync(join(root, 'index.html'), 'utf8'), /^<title>Flat<\/title>/);
 
   // pull, step one: the reads to make.
   const reads = await w.ok(['pull']);

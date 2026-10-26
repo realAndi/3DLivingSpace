@@ -20,7 +20,7 @@ import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { ToolError } from '../../../src/agent.js';
 import { cleanDesign } from '../../../src/design.js';
-import { assembleApp, pageTitle, PICTURES } from './app.mjs';
+import { assembleApp, artifactPage, pageTitle, PICTURES } from './app.mjs';
 import { singleFile } from './single.mjs';
 import { writeAtomic, newDoc } from './workdir.mjs';
 
@@ -76,6 +76,15 @@ function filesUnder(dir, prefix = '') {
   }).sort();
 }
 
+// Just the page, named for the unit.
+function writePage(out, title) {
+  const page = join(out, 'index.html');
+  mkdirSync(out, { recursive: true });
+  const html = isPackaged() ? readFileSync(join(PACKAGED_APP, 'index.html'), 'utf8').replace(/<title>[^<]*<\/title>/, () => pageTitle(title))
+    : artifactPage(readFileSync(join(REPO, 'index.html'), 'utf8'), { title });
+  writeAtomic(page, html);
+}
+
 // The page is named for the unit (the gallery shows its <title>). A picture
 // the app carries (the example's floor plan) goes only with a unit that shows
 // it: anyone's own plan stays in the conversation.
@@ -103,7 +112,11 @@ export function bundle(work, { out = work.path('artifact'), snapshotOnly = false
   const doc = work.load();
   const url = work.url;
   if (snapshotOnly && !url) throw new ToolError('--snapshot-only replaces the unit.json of an Artifact already published: pass --url <its URL>, or bundle without it to publish the whole app.');
-  const files = snapshotOnly ? [] : writeApp(out, { title: doc.title || doc.unit.name, unit: doc.unit }).filter((f) => f !== 'index.html');
+  const title = doc.title || doc.unit.name;
+  // The Artifact tool publishes a page with whatever else changes, so a
+  // snapshot alone still goes with the page (as it was, named for the unit).
+  if (snapshotOnly) writePage(out, title);
+  const files = snapshotOnly ? [] : writeApp(out, { title, unit: doc.unit }).filter((f) => f !== 'index.html');
   writeAtomic(join(out, 'unit.json'), JSON.stringify(snapshotOf(doc)));
   files.push('unit.json');
   const bytes = [...files, ...(snapshotOnly ? [] : ['index.html'])].reduce((n, f) => n + statSync(join(out, f)).size, 0);
@@ -111,8 +124,8 @@ export function bundle(work, { out = work.path('artifact'), snapshotOnly = false
   const list = files.map((path) => ({ path }));
   if (snapshotOnly) {
     return {
-      publish: { url, root: out, files: list },
-      next: 'Call the Artifact tool with publish as it is. It replaces only unit.json, the snapshot that signed-out visitors see and every page shows first; the page and its other files stay.',
+      publish: { url, file_path: join(out, 'index.html'), root: out, files: list },
+      next: 'Call the Artifact tool with publish as it is. It replaces unit.json, the snapshot that signed-out visitors see and every page shows first; the page goes along as it was, and the other files stay.',
     };
   }
   return {
