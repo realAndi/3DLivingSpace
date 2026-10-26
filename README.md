@@ -35,6 +35,13 @@ who can look around and make their own version.
   over a sofa arm, a side table into a sectional's corner. Fine-tune with the arrow keys
   (1", Alt ¼", Shift 1'), `[` `]` to turn 15° (Alt 1°), or the nudge pad on the
   piece's bar on a phone. A selected piece shows its clearance on each side.
+- **Where things go.** Every piece has a placement. Floor pieces stand on the
+  floor. Surface pieces (lamps, books, a vase, plates, a laptop, a coffee maker)
+  snap onto the table, dresser, shelf or counter under them. Wall pieces (art,
+  mirrors, a TV, sconces, shelves, curtains, blinds) hang on a wall at a height
+  you set, slide along it and stop at windows, doorways and corners. Ceiling
+  pieces (pendants, fans) hang from the ceiling. Moving a table carries what's
+  on it; deleting it takes them too.
 - **Tape measure** in every view: along the floor in Plan, between any two
   surfaces (heights too) in Dollhouse and Walk.
 - **Units:** Feet & inches, Inches, or Centimeters (Tools tab), per browser.
@@ -55,8 +62,8 @@ piece faces south.
 | `build_unit` | Lay the unit out from the plan in one call: settings plus whole lists of rooms, walls, openings, fixtures, labels |
 | `edit_unit` | Change rooms, walls, openings or fixtures by id, or remove them |
 | `set_info` | Title and author |
-| `place_items` / `update_items` / `remove_items` | Furniture |
-| `create_asset` | A custom 3D piece from boxes, cylinders, cones and spheres |
+| `place_items` / `update_items` / `remove_items` | Furniture: on the floor, on a piece or counter (`on`), on a wall at a height (`elevation`), or from the ceiling; what rests on a piece moves and goes with it |
+| `create_asset` | A custom 3D piece from boxes, cylinders, cones and spheres, with where it goes, what it is, and a bulb for lamps |
 | `find_spots` | Where a footprint fits, optionally against a wall |
 | `check_unit` | The unit's problems, and each piece's clear floor and problems |
 | `render_plan` | A labeled top-down picture with inch coordinates, to compare with the floor plan |
@@ -80,6 +87,13 @@ same thing from it:
   laundry, closets, fireplaces and more.
 - **Finishes:** wall paint, floors per room, cabinets, counters, backsplash,
   appliances, hardware, tile.
+- **North:** which way true north points on the plan, for the sun.
+
+Placed pieces are `{uid, type, w, d, h, x, z, rot, color, asset?}` in feet, plus,
+off the floor, `y` (the height of the underside) and `on` (`wall`, `ceiling`,
+`p:<uid>` for a piece, `f:<id>` for a fixture). `src/stacking.js` puts them
+there and moves what rests on a piece with it; collisions and checks
+(`src/parts.js`, `src/fit.js`) work at every piece's real height.
 
 Building a unit also checks it: overlapping rooms, walls far too thick (a room
 missing) or slivers (rooms meant to touch), doors not in a wall, fixtures in a
@@ -135,6 +149,7 @@ fixes the origin used in links.
 | `src/unit.js` | The unit model: vocabulary, cleaning, inch conversion, and building walls, openings and fixtures from it |
 | `src/example.js` | The example unit, traced from the leasing plan |
 | `src/geometry.js`, `src/fit.js` | Plane geometry; overlap, clearance and free-spot checks |
+| `src/stacking.js` | What holds each piece up: tops and shelves, walls, the ceiling; carrying what rests on a piece |
 | `src/catalog.js`, `src/design.js` | Furniture catalog; the stored document and its checks |
 | `src/architecture.js`, `src/fixtures.js` | 3D walls, floors, ceilings, doors, windows, railings; kitchens, baths and other built-ins |
 | `src/furniture.js`, `src/layout.js` | 3D furniture and custom pieces; placing, dragging, clearances |
