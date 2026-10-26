@@ -156,6 +156,10 @@ They may have moved furniture in the page since you last looked, so:
 If they send you a piece or a room from the page (an attachment naming a `piece_id`
 or a `room`), that's what they mean: pull, then act on it.
 
+If they say the page won't load, read what it recorded when they opened it: ArtifactData
+`get`, collection `data/users/me`, doc `boot` (how far it got, any errors, their
+browser). The page also shows the error on screen.
+
 ## Suggestions
 
 People who make their own version in the page can send it back as a suggestion. The
