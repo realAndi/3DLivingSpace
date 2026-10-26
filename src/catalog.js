@@ -64,7 +64,7 @@ export const CATALOG = [
   { type: 'vase', name: 'Vase', group: 'Living', kind: 'decor', place: 'surface', w: 6, d: 6, h: 12 },
   { type: 'plant-small', name: 'Small plant', group: 'Living', kind: 'plant', place: 'surface', w: 8, d: 8, h: 12 },
   { type: 'plates', name: 'Plates', group: 'Dining', kind: 'decor', place: 'surface', w: 11, d: 11, h: 3 },
-  { type: 'laptop', name: 'Laptop', group: 'Bedroom', kind: 'electronics', place: 'surface', w: 13, d: 9, h: 9, act: 'screen' },
+  { type: 'laptop', name: 'Laptop', group: 'Bedroom', kind: 'electronics', place: 'surface', w: 13, d: 11, h: 9, act: 'screen' },
   { type: 'microwave', name: 'Countertop microwave', group: 'Kitchen', kind: 'appliance', place: 'surface', w: 20, d: 15, h: 12, act: 'door' },
   { type: 'coffee-maker', name: 'Coffee maker', group: 'Kitchen', kind: 'appliance', place: 'surface', w: 9, d: 11, h: 14 },
 
@@ -74,7 +74,7 @@ export const CATALOG = [
   { type: 'wall-shelf', name: 'Wall shelf', group: 'Living', kind: 'furniture', place: 'wall', w: 36, d: 10, h: 2, y: 54 },
   { type: 'wall-tv', name: 'Wall TV (55")', group: 'Living', kind: 'electronics', place: 'wall', w: 49, d: 2, h: 28.5, y: 36, act: 'screen' },
   { type: 'sconce', name: 'Wall sconce', group: 'Living', kind: 'lighting', place: 'wall', w: 6, d: 8, h: 12, y: 60, act: 'light' },
-  { type: 'curtains', name: 'Curtains', group: 'Living', kind: 'decor', place: 'wall', w: 84, d: 6, h: 92, y: 4, act: 'curtain' },
+  { type: 'curtains', name: 'Curtains', group: 'Living', kind: 'decor', place: 'wall', w: 84, d: 6, h: 95, y: 1, act: 'curtain' },
   { type: 'blinds', name: 'Blinds', group: 'Living', kind: 'decor', place: 'wall', w: 36, d: 3, h: 60, y: 22, act: 'curtain' },
 
   // From the ceiling. Height runs from the ceiling down to the bottom.
