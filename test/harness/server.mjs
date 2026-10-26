@@ -156,6 +156,8 @@ export async function startHarness({ root = REPO, port = 8791, host = '127.0.0.1
       },
       // search() is [] for anyone who can neither edit nor comment, or from outside.
       searchable: atLeast(who.level, 'interact') && !who.outside,
+      // room.canSendToClaudeSession(): &ask=available|no_session|off (default available).
+      ask: p.get('ask') ?? 'available',
       genericAvatar: GENERIC_AVATAR, neutralColor: NEUTRAL,
     };
   }
@@ -168,7 +170,7 @@ export async function startHarness({ root = REPO, port = 8791, host = '127.0.0.1
 const config = ${data};
 window.__mock = { role: config.role, level: config.level, uid: config.uid, log: [] };
 if (config.nocap) return;
-const served = { db: config.level !== 'none', user: true };
+const served = { db: config.level !== 'none', user: true, room: config.level !== 'none' && !config.outside };
 const memo = {};
 let mod;
 const after = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -223,6 +225,25 @@ window.claude = Object.freeze({ use });
     return { id: uid, name, color, avatarUrl: avatarOf(name, color), guest: seen.get(uid) === 'outside' };
   }
 
+  // The room: who has a page open now, with their presence, kept only while
+  // their stream is open; and what pages handed to Claude (sendToClaudeSession).
+  const peers = new Map();   // peer → { peer, by, guest, presence, updatedAt, res }
+  const sentToClaude = [];
+  const peersOut = () => [...peers.values()].map(({ res: _, ...p }) => p);
+  const roomBroadcast = () => { const data = JSON.stringify(peersOut()); for (const p of peers.values()) p.res.write(`event: peers\ndata: ${data}\n\n`); };
+  function roomLive(req, res, url) {
+    let who;
+    try { who = identify(url.searchParams.get('as'), url.searchParams.get('uid')); } catch (e) { return send(res, 400, e.message, 'text/plain'); }
+    const peer = String(url.searchParams.get('peer') ?? '');
+    if (who.level === 'none' || !/^[a-z0-9]{8,32}$/.test(peer)) return send(res, 403, 'No room for this viewer.', 'text/plain');
+    res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', Connection: 'keep-alive' });
+    res.write('retry: 1000\n\n');
+    peers.set(peer, { peer, by: who.uid, guest: !!who.outside, presence: peers.get(peer)?.presence ?? {}, updatedAt: Date.now(), res });
+    roomBroadcast();
+    const ping = setInterval(() => res.write(': ping\n\n'), 15000);
+    req.on('close', () => { clearInterval(ping); if (peers.get(peer)?.res === res) { peers.delete(peer); roomBroadcast(); } });
+  }
+
   // Changes reach a page only if its viewer may read them.
   function live(req, res, url) {
     let who;
@@ -275,6 +296,15 @@ window.claude = Object.freeze({ use });
     }
 
     if (p === '/__db/live' && get) return live(req, res, url);
+    if (p === '/__room/live' && get) return roomLive(req, res, url);
+    if (p === '/__room/presence' && post) {
+      const { peer, presence } = await readJson(req);
+      const p0 = peers.get(peer);
+      if (p0 && presence && typeof presence === 'object') { p0.presence = presence; p0.updatedAt = Date.now(); roomBroadcast(); }
+      return json(res, 200, { ok: !!p0 });
+    }
+    if (p === '/__room/send' && post) { const body = await readJson(req); sentToClaude.push(body); say(`  handed to Claude: ${JSON.stringify(body.data).slice(0, 160)}`); return json(res, 200, { to: 'pane' }); }
+    if (p === '/__room/sent' && get) return json(res, 200, sentToClaude);
     if (p === '/__db/call' && post) {
       let who, body;
       try { who = identify(req.headers['x-harness-as'], req.headers['x-harness-uid']); body = await readJson(req); } catch (e) { return json(res, 400, { error: { code: 'invalid_argument', message: e.message } }); }

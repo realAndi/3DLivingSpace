@@ -20,7 +20,50 @@ import { splitPath, checkBody, checkQuery, runQuery, filterOnly, deepMerge, deep
 export function namespace(name, config) {
   if (name === 'db') return config.level === 'none' ? null : dbNamespace(config);
   if (name === 'user') return userNamespace(config);
+  if (name === 'room') return roomNamespace(config);
   return null;
+}
+
+// The room, as room.d.ts has it, only as far as the app uses it: presence,
+// peers and onPeers (from one EventSource), canSendToClaudeSession and
+// sendToClaudeSession (recorded by the server at /__room/sent). Moments on
+// topics (emit/on) go nowhere.
+function roomNamespace(config) {
+  const peer = Array.from(crypto.getRandomValues(new Uint8Array(8)), (b) => b.toString(36).padStart(2, '0')).join('').slice(0, 16);
+  let list = Object.freeze([]), mine = {};
+  const handlers = new Set();
+  const asPeer = (p) => Object.freeze({ peer: p.peer, by: p.by, isMe: p.by === config.uid && config.uid != null, sameTab: p.peer === peer, kind: 'viewer', guest: p.guest, presence: Object.freeze({ ...p.presence }), updatedAt: p.updatedAt });
+  const es = new EventSource(`/__room/live?as=${encodeURIComponent(config.role)}&uid=${encodeURIComponent(config.uid ?? '')}&peer=${peer}`);
+  es.addEventListener('peers', (ev) => {
+    const before = new Map(list.map((p) => [p.peer, p]));
+    list = Object.freeze(JSON.parse(ev.data).map((p) => (before.get(p.peer)?.updatedAt === p.updatedAt ? before.get(p.peer) : asPeer(p))));
+    const now = new Set(list.map((p) => p.peer));
+    const change = Object.freeze({
+      peers: list, joined: list.filter((p) => !before.has(p.peer)), left: [...before.values()].filter((p) => !now.has(p.peer)),
+      updated: list.filter((p) => before.has(p.peer) && before.get(p.peer) !== p),
+    });
+    for (const h of handlers) { try { h(change); } catch (e) { report(e); } }
+  });
+  const post2 = (url, body) => fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then((r) => r.json());
+  return Object.freeze({
+    presence(patch) {
+      mine = { ...mine };
+      for (const [k, v] of Object.entries(patch ?? {})) { if (v === null) delete mine[k]; else mine[k] = v; }
+      return post2('/__room/presence', { peer, presence: mine }).then(() => {});
+    },
+    peers: () => list,
+    onPeers(handler) { handlers.add(handler); queueMicrotask(() => handler(Object.freeze({ peers: list, joined: list, left: [], updated: [] }))); return () => handlers.delete(handler); },
+    emit: () => Promise.resolve(),
+    on: () => () => {},
+    connected: () => es.readyState === 1,
+    onConnection: () => () => {},
+    canSendToClaudeSession: () => Promise.resolve(config.ask),
+    sendToClaudeSession(data, options) {
+      if (!['available', 'available_if_summoned', 'available_if_opened'].includes(config.ask)) return Promise.reject(fail('claude_unavailable', 'Nothing beside this view takes it.'));
+      if (!data || typeof data !== 'object' || Array.isArray(data) || !Object.keys(data).length) return Promise.reject(fail('invalid_argument', 'Not a plain, non-empty object.'));
+      return post2('/__room/send', { data, options: { deliver: options?.deliver ?? 'stage' } });
+    },
+  });
 }
 
 const fail = (code, message) => ({ code, message });

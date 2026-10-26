@@ -3,9 +3,10 @@
 // a browser. It is the Artifact's page (app.mjs) with its files folded in: each
 // module becomes a data: URL in the import map, under a bare name so the
 // modules still find each other; the textures and the snapshot ride along as
-// globals that src/textures.js and src/claude-store.js look for. Only three.js
-// and the fonts still come from the network.
-import { readFileSync, readdirSync } from 'node:fs';
+// globals that src/textures.js, src/claude-store.js and src/main.js look for
+// (with the example's floor plan when the unit shows it). Only three.js and the
+// fonts still come from the network.
+import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join, posix } from 'node:path';
 import { moduleGraph, artifactPage, pageTitle } from './app.mjs';
 
@@ -38,12 +39,18 @@ export function singleFile(root, snapshot, { page, title } = {}) {
       textures[`${size}/${f.replace(/\.webp$/, '')}`] = `data:image/webp;base64,${b64(readFileSync(join(dir, f)))}`;
     }
   }
+  // The picture a unit lays under its plan (only the example has one), keyed by its src.
+  const plans = {};
+  const src = snapshot.unit?.planImage?.src;
+  if (typeof src === 'string' && /^assets\/[\w.-]+\.(png|jpg)$/.test(src) && existsSync(join(root, src))) {
+    plans[src] = `data:image/${src.endsWith('.png') ? 'png' : 'jpeg'};base64,${b64(readFileSync(join(root, src)))}`;
+  }
   const body = page
     .replace(/<script type="importmap">[\s\S]*?<\/script>/, () => `<script type="importmap">${json({ imports })}</script>`)
     .replace(/<script type="module" src="\.\/src\/main\.js"[^>]*><\/script>/, `<script type="module">import '${NAME}src/main.js';</script>`);
   if (!body.includes(`import '${NAME}src/main.js'`)) throw new Error('index.html no longer loads ./src/main.js the way single.mjs expects.');
   return '<!doctype html><html lang="en"><head><meta charset="utf-8">'
     + '<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"></head><body>\n'
-    + `<script>window.LIVING_SPACE_SNAPSHOT = ${json(snapshot)}; window.LIVING_SPACE_TEXTURES = ${json(textures)};</script>\n`
+    + `<script>document.documentElement.classList.add('in-file'); window.LIVING_SPACE_SNAPSHOT = ${json(snapshot)}; window.LIVING_SPACE_TEXTURES = ${json(textures)}; window.LIVING_SPACE_PLANS = ${json(plans)};</script>\n`
     + `${body}</body></html>\n`;
 }

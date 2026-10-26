@@ -27,8 +27,9 @@ import { fmtLen, fmtDims, fmtArea } from './units.js';
 //
 // The same page runs as a claude.ai Artifact (its first line sets
 // window.LIVING_SPACE): there the unit lives in the Artifact's own database,
-// through src/claude-store.js, loaded only then and starting now.
-const inClaude = window.LIVING_SPACE === 'artifact' ? import('./claude-store.js') : null;
+// through src/claude-store.js, and the people looking at it at the same time
+// see each other (src/together.js): both loaded only then, and starting now.
+const inClaude = window.LIVING_SPACE === 'artifact' ? Promise.all([import('./claude-store.js'), import('./together.js')]) : null;
 
 const DEG = Math.PI / 180;
 const EYE = 5.2;
@@ -675,7 +676,8 @@ function showUnit(spec, { fresh = false } = {}) {
 // Units on the server (or in an Artifact's database): opening, saving,
 // sharing, view-only, your own version
 let loadedHome = false;
-const Session = inClaude ? (await inClaude).ArtifactSession : UnitSession;
+const [store, others] = inClaude ? await inClaude : [];
+const Session = store ? store.ArtifactSession : UnitSession;
 const session = new Session({
   onLoad: (doc, ss) => {
     // Measurements stay when the same unit comes back (your own copy of it).
@@ -705,6 +707,30 @@ const session = new Session({
     suggest.layoutChanged();
   },
   onState: (ss) => renderSession(ss),
+});
+
+// As an Artifact: everyone looking at it now, as figures where they walk, and
+// a way to hand a piece to the viewer's own Claude (src/together.js).
+const together = others?.createTogether({ scene, stage, invalidate }) ?? null;
+if (together) {
+  const use = (name) => { try { return Promise.resolve(window.claude?.use?.(name) ?? null).catch(() => null); } catch { return Promise.resolve(null); } };
+  Promise.all([use('room'), use('user')]).then(([room, user]) => together.connect(room, user)).then(() => { $('#peAsk').hidden = !together.canAsk; });
+}
+
+// The selected piece, handed to the viewer's Claude as data it can act on with
+// the skill's tools: inches, as they are. Called straight from the click.
+const inch = (ft) => Math.round(ft * 12 * 10) / 10;
+$('#peAsk').addEventListener('click', () => {
+  const it = layout.current;
+  if (!it || !together?.canAsk) return;
+  const room = U.roomAt(it.x, it.z);
+  together.ask({
+    label: `${it.name}${room ? ` in ${room.name}` : ''}`,
+    kind: 'piece', piece_id: it.uid, name: it.name, type: it.type === 'asset' ? `asset:${it.asset}` : it.type, room: room?.id ?? null,
+    at: [inch(it.x), inch(it.z)], rotation: it.rot, size: [inch(it.w), inch(it.d), inch(it.h)], on: it.on ? it.on.replace(/^[pf]:/, '') : 'floor',
+    unit: session.title || null,
+  }).then(() => layout.toast('It\'s in your message to Claude. Say what you\'d like, and send it.'),
+    () => layout.toast('Open this page next to your conversation with Claude to ask about a piece.'));
 });
 
 // Suggestions from copies of this unit, previewed one at a time in place of
@@ -1140,6 +1166,11 @@ function drawMinimap() {
   g.globalAlpha = 1;
   g.beginPath(); g.arc(cx, cz, 4.5, 0, Math.PI * 2); g.fill();
   g.strokeStyle = colors.surface; g.lineWidth = 1.5; g.stroke();
+  // Others walking through it with you (an Artifact's room).
+  for (const w of together?.walkers() ?? []) {
+    g.fillStyle = w.color;
+    g.beginPath(); g.arc(ox + w.x * s, oz + w.z * s, 4, 0, Math.PI * 2); g.fill(); g.stroke();
+  }
 }
 mm.addEventListener('pointerdown', (e) => {
   if (!mmT) return;
@@ -1417,11 +1448,14 @@ function frame(now = performance.now()) {
   changed = things.step(dt) || changed;
   changed = stepHighlight(dt) || changed;
   changed = lighting.update(activeCam(), dt) || changed;
+  together?.share(mode, walk);
   // The prompt for what you can use follows the view either way.
   if (!changed) { things.update(now); return; }
   needsRender = false;
+  together?.place(mode);
   renderer.render(scene, activeCam());
   updateLabels();
+  together?.tags((x, y, z) => project(x, y, z, activeCam()));
   layout.updateOverlay(activeCam());
   tape.update(activeCam());
   drawMinimap();

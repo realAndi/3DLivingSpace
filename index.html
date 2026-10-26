@@ -81,6 +81,10 @@ body:not([data-role="viewer"]) [data-visitor] { display: none !important; }
    only the Artifact's, and your own version is a place of its own. */
 .in-claude [data-site] { display: none !important; }
 html:not(.in-claude) [data-artifact] { display: none !important; }
+/* The one-file copy (skill/3d-living-space/scripts/single.mjs): an Artifact's
+   page without claude.ai around it, so nothing about sharing it there. */
+.in-file [data-claude] { display: none !important; }
+html:not(.in-file) [data-file] { display: none !important; }
 body:not([data-role="version"]) [data-version] { display: none !important; }
 /* The page keeps clear of the screen's safe areas itself (--safe-t, --safe-b). */
 html.in-claude { padding: 0; }
@@ -233,6 +237,17 @@ h1 a:hover { color: var(--oak); }
 .room-label.zone b { font-weight: 700; color: #4a463f; text-shadow: 0 0 4px #f4f1ec, 0 0 8px #f4f1ec; }
 .room-label.minor { padding: 2px 6px 3px; }
 .labels.compact .room-label span { display: none; }
+/* Others looking at the same Artifact, over their heads as they walk (src/together.js). */
+.peer-tags { position: absolute; inset: 0; pointer-events: none; z-index: 1; }
+.peer-tag {
+  position: absolute; left: 0; top: 0; display: flex; align-items: center; gap: 6px; white-space: nowrap;
+  font-size: 12px; font-weight: 600; line-height: 1.25; color: var(--ink);
+  background: color-mix(in srgb, var(--surface) 90%, transparent);
+  padding: 3px 9px 4px 7px; border-radius: 999px; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.14);
+  will-change: transform;
+}
+.peer-tag::before { content: ""; width: 9px; height: 9px; border-radius: 50%; background: var(--peer, var(--oak)); }
+.peer-tag.idle { opacity: 0.55; }
 .labels.compact .room-label { padding: 2px 6px 3px; }
 .labels.compact .room-label b { font-size: 9.5px; }
 .room-label.minor b { font-size: 9.5px; }
@@ -897,6 +912,7 @@ h1 a:hover { color: var(--oak); }
             <div class="swatches" id="peSwatches" role="group" aria-label="Color"></div>
             <div class="btn-row">
               <button class="btn" id="peDup">Duplicate</button>
+              <button class="btn" id="peAsk" data-artifact hidden title="Hand this piece to Claude in your conversation beside this page">Ask Claude</button>
               <button class="btn" id="peDel">Delete</button>
             </div>
           </div>
@@ -942,7 +958,11 @@ h1 a:hover { color: var(--oak); }
             <label class="field wide"><span>Your name (optional)</span><input id="designAuthor" type="text" maxlength="40" placeholder="Shown as “by …”" autocomplete="off"></label>
             <p class="status" id="saveStatus" role="status"></p>
           </div>
-          <div class="group" data-artifact>
+          <div class="group" data-file>
+            <h2>Share</h2>
+            <p class="section-note flush">This page is a file. To share it, send the file itself; it opens in any browser. What you change here is kept in this browser only.</p>
+          </div>
+          <div class="group" data-artifact data-claude>
             <h2>Share</h2>
             <p class="section-note flush">Share this page from the Share menu at the top of the Artifact in Claude. What people can do depends on their access:</p>
             <ul class="notes">

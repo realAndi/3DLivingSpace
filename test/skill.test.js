@@ -204,7 +204,7 @@ test('skill: bundle, push and pull keep the Artifact\'s files and database in st
   assert.deepEqual(b.publish.capabilities, { db: { rules: [
     { path: '', read: 'view', write: 'admin' }, { path: 'data/users/{self}', write: 'interact' },
     { path: 'suggestions', read: 'admin', write: 'admin' }, { path: 'suggestions/{self}', read: 'interact', write: 'interact' },
-  ] }, user: { scopes: ['profile'] } });
+  ] }, user: { scopes: ['profile'] }, room: {} });
   assert.match(b.publish.description, /^A to-scale 3D model of a studio, 1 bath apartment/);
   const page = readFileSync(b.publish.file_path, 'utf8');
   assert.doesNotMatch(page, /<!doctype|<html[\s>]|<head>|<body[\s>]/i, 'body only');
