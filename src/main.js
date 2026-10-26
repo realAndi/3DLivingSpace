@@ -8,6 +8,9 @@ import { LayoutEditor } from './layout.js';
 import { TapeMeasure } from './measure.js';
 import { UnitSession } from './sync.js';
 import { buildSurroundings } from './surroundings.js';
+import { createLighting } from './lighting.js';
+import { createLightPanel } from './lightpanel.js';
+import { actOf } from './catalog.js';
 import { WalkControls } from './walk.js';
 import { buildUnit, cleanUnit, emptyUnit } from './unit.js';
 import { pointInPoly, distToSegment, parseFeetInches } from './geometry.js';
@@ -98,26 +101,10 @@ plot.material.depthWrite = false;
 plot.visible = false;
 scene.add(plot);
 
-// Lights
-const hemi = new THREE.HemisphereLight(0xf5f7fa, 0xcdbfae, 1.3);
-const sun = new THREE.DirectionalLight(0xfff0dc, 2.4);
-sun.castShadow = true;
-sun.shadow.mapSize.set(coarse ? 1536 : 2048, coarse ? 1536 : 2048);
-sun.shadow.bias = -0.0004;
-sun.shadow.normalBias = 0.035;
-scene.add(hemi, sun, sun.target);
-let sunDist = 90;
-const LIGHTING = {
-  dollhouse: { az: 155, el: 58, sun: 2.3, hemi: 1.35, env: 0.45 },
-  plan: { az: 200, el: 72, sun: 1.7, hemi: 1.6, env: 0.4 },
-  walk: { az: 105, el: 24, sun: 3.2, hemi: 1.25, env: 0.6 },
-};
-function setLighting(m) {
-  const L = LIGHTING[m], r = sunDist;
-  sun.target.position.copy(CENTER);
-  sun.position.set(CENTER.x + Math.sin(L.az * DEG) * Math.cos(L.el * DEG) * r, Math.sin(L.el * DEG) * r, CENTER.z - Math.cos(L.az * DEG) * Math.cos(L.el * DEG) * r);
-  sun.intensity = L.sun; hemi.intensity = L.hemi; scene.environmentIntensity = L.env;
-}
+// Lights: the sun and sky at the viewer's time of day, room lights and lamps
+// (src/lighting.js). Its group holds the lights themselves: never hide it.
+const lighting = createLighting({ renderer, scene, M, coarse, invalidate });
+scene.add(lighting.group);
 
 // The floor plan picture under the tracing (only the example has one).
 let planOverlay = null;
@@ -170,16 +157,13 @@ plan.target.copy(CENTER);
 for (const c of [doll, plan]) c.addEventListener('change', () => invalidate());
 
 // Framing follows the unit's size: where it sits, how far the cameras stand
-// back, how far Plan zooms in, and the shadow camera.
+// back and how far Plan zooms in. (The sun's shadow camera: lighting.setUnit.)
 function measureUnit() {
   const b = U.bounds;
   CENTER.set((b.x0 + b.x1) / 2, 0, (b.z0 + b.z1) / 2);
   const w = b.x1 - b.x0, d = b.z1 - b.z0;
   SIZE = { w, d, k: Math.max(Math.max(w, d) / REF.long, Math.min(w, d) / REF.short) };
   const R = Math.hypot(w, d) / 2 + 4.4;
-  Object.assign(sun.shadow.camera, { left: -R, right: R, top: R, bottom: -R, near: 1, far: Math.max(220, R * 8) });
-  sun.shadow.camera.updateProjectionMatrix();
-  sunDist = Math.max(90, R * 3.3);
   doll.maxDistance = 160 * Math.max(1, SIZE.k);
   plan.maxZoom = clamp(9 * SIZE.k, 4, 40);
   planCam.far = Math.max(400, 200 + R * 2);
@@ -227,11 +211,17 @@ function doorAt(h) {
   return null;
 }
 
+// TEMP (lighting): light switches work by tap, click and E through the door
+// paths below (ids 'switch:<room>') until src/interact.js's registry takes them.
+const switchRoomOf = (h) => h?.object.userData.switchRoom;
+const withSwitches = () => (mode === 'plan' ? pickables() : [...pickables(), ...lighting.switches.flatMap((s) => s.objects)]);
+
 function pickWalk(cx, cy) {
   if (tape.active) return null;
   aim(cx, cy, walkCam);
-  const h = ray.intersectObjects(pickables(), true)[0];
+  const h = ray.intersectObjects(withSwitches(), true)[0];
   if (!h) return null;
+  if (switchRoomOf(h)) return h.distance < 9 ? { type: 'door', id: `switch:${switchRoomOf(h)}` } : null; // TEMP (lighting)
   const door = doorAt(h);
   if (door) return { type: 'door', id: door };
   const p = h.point.clone();
@@ -268,6 +258,7 @@ function interact() {
   if (mode !== 'walk') return;
   const r = canvas.getBoundingClientRect();
   const hit = pickWalk(r.left + r.width / 2, r.top + r.height / 2);
+  if (hit?.type === 'door' && String(hit.id).startsWith('switch:')) { toggleDoor(hit.id); return; } // TEMP (lighting)
   if (hit?.type === 'door' && doorDistance(hit.id) < 9) { toggleDoor(hit.id); return; }
   const fx = Math.sin(walk.yaw * DEG), fz = -Math.cos(walk.yaw * DEG);
   let best = null;
@@ -282,6 +273,7 @@ function interact() {
 const doorDistance = (id) => { const o = U.openings.find((x) => x.id === id); return o ? Math.hypot(o.x - walk.x, o.z - walk.z) : Infinity; };
 
 function toggleDoor(id) {
+  if (String(id).startsWith('switch:')) { lighting.toggleRoom(id.slice(7)); return; } // TEMP (lighting)
   const d = doors.find((x) => x.id === id);
   if (!d) return;
   d.target = d.target > 10 ? 0 : d.openTo;
@@ -480,6 +472,9 @@ const layout = new LayoutEditor({
   onSelect: (id) => { stage.classList.toggle('piece-active', id != null); if (id != null) dismissHint(); },
   onOps: (ops) => session.queue(ops),
   onAdded: () => { if (narrow()) setSheet(false); },
+  // Lamps light the room when on (src/lighting.js).
+  onMount: (item, g) => { if (actOf(item, layout.assets) === 'light') lighting.addLamp(item.uid, g); },
+  onUnmount: (uid) => lighting.removeLamp(uid),
   onEdit: () => {
     openTab('t-furniture');
     $('#pieceEditor').scrollIntoView({ block: 'nearest' });
@@ -531,6 +526,9 @@ $('#tapeClear').addEventListener('click', () => { tape.clear(); renderTapeUI(); 
 $('#clearMeasure').addEventListener('click', () => { tape.clear(); renderTapeUI(); });
 canvas.addEventListener('pointerup', () => { if (tape.active) queueMicrotask(renderTapeUI); });
 
+// The lights panel: time of day and each room's lights (src/lightpanel.js).
+createLightPanel({ lighting, button: $('#lightsBtn'), pop: $('#lightsPop'), getMode: () => mode, onOpen: () => { if (narrow()) setSheet(false); } });
+
 // Taps in Dollhouse / Plan: measure, swing doors, double-tap to walk in.
 let down = null;
 let lastTap = { t: 0, x: 0, y: 0 };
@@ -546,7 +544,8 @@ const endTap = (e) => {
   down = null;
   if (e.type === 'pointercancel' || moved > 7 || held > 500) return;
   aim(e.clientX, e.clientY, activeCam());
-  const h = ray.intersectObjects(pickables(), true)[0];
+  const h = ray.intersectObjects(withSwitches(), true)[0];
+  if (switchRoomOf(h)) { lighting.toggleRoom(switchRoomOf(h)); return; } // TEMP (lighting)
   const door = doorAt(h);
   if (door) { toggleDoor(door); return; }
   const now = performance.now();
@@ -625,6 +624,7 @@ function showUnit(spec, { fresh = false } = {}) {
   plot.visible = U.empty;
   plot.position.set((U.bounds.x0 + U.bounds.x1) / 2, 0, (U.bounds.z0 + U.bounds.z1) / 2);
   measureUnit();
+  lighting.setUnit(U);
   layout.setUnit(U);
   tape.setUnit(U);
   clearHighlight();
@@ -647,7 +647,7 @@ function showUnit(spec, { fresh = false } = {}) {
     walk.setPose(startPose());
   }
   applyModeVisibility();
-  setLighting(mode ?? 'dollhouse');
+  lighting.setMode(mode ?? 'dollhouse');
   invalidate();
 }
 
@@ -1032,7 +1032,7 @@ function setMode(m, { keepHash = false } = {}) {
   walk.enabled = m === 'walk';
   const inside = m === 'walk';
   applyModeVisibility();
-  setLighting(m);
+  lighting.setMode(m);
   document.querySelectorAll('.mode').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.mode === m)));
   $('#minimap').hidden = !inside;
   $('#joystick').hidden = !(inside && coarse);
@@ -1236,6 +1236,7 @@ function frame(now = performance.now()) {
   else changed = walk.update(dt) || changed;
   changed = animateDoors(dt) || changed;
   changed = stepHighlight(dt) || changed;
+  changed = lighting.update(activeCam(), dt) || changed;
   if (!changed) return;
   needsRender = false;
   renderer.render(scene, activeCam());
@@ -1266,7 +1267,7 @@ renderTapeUI();
 // Small hook for scripted screenshots and tests.
 window.app = {
   ready: false,
-  setMode, focusRoom, toggleDoor, invalidate, walk, setSheet, layout, session, tape, units,
+  setMode, focusRoom, toggleDoor, invalidate, walk, setSheet, layout, session, tape, units, lighting,
   get doors() { return doors; },
   get U() { return U; },
   // GPU memory and draw counts, to check that rebuilds don't leak.

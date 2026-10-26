@@ -269,6 +269,50 @@ h1 a:hover { color: var(--oak); }
 .recenter { right: 16px; top: max(16px, var(--safe-t)); }
 .tape-btn { right: 16px; top: calc(max(16px, var(--safe-t)) + 48px); }
 .tape-btn[aria-pressed="true"] { background: var(--chip); color: var(--on-chip); }
+
+/* Lights and time of day (src/lightpanel.js): a button under the tape measure
+   and a small popover beside it. */
+.lights-btn { right: 16px; top: calc(max(16px, var(--safe-t)) + 96px); }
+.lights-btn .i-moon, .lights-btn.night .i-sun { display: none; }
+.lights-btn.night .i-moon { display: block; }
+.lights-btn[aria-expanded="true"] { background: var(--chip); color: var(--on-chip); }
+.lights-pop {
+  position: absolute; z-index: 5; right: 68px; top: calc(max(16px, var(--safe-t)) + 48px); width: 304px;
+  max-height: calc(100% - 96px); overflow-y: auto; overscroll-behavior: contain;
+  background: var(--surface); border: 1px solid var(--rule); border-radius: 14px; box-shadow: var(--shadow);
+  padding: 12px 14px 14px;
+}
+.lp-head { display: flex; align-items: center; gap: 8px; }
+.lp-title { font-weight: 700; font-size: 13px; flex: 1; }
+.lp-clock { font: 500 13px/1 var(--font-mono); font-variant-numeric: tabular-nums; }
+.lp-now { padding: 5px 11px; font-size: 12px; }
+.lp-x { appearance: none; border: 0; background: none; cursor: pointer; width: 28px; height: 28px; margin-right: -6px; border-radius: 50%; display: grid; place-items: center; color: var(--ink-2); }
+.lp-x:hover { background: var(--surface-2); }
+.lp-x svg { width: 14px; height: 14px; }
+.lp-slider { -webkit-appearance: none; appearance: none; width: 100%; height: 30px; margin: 6px 0 0; background: none; cursor: pointer; }
+.lp-slider::-webkit-slider-runnable-track { height: 8px; border-radius: 4px; background: var(--lp-track, var(--rule)); }
+.lp-slider::-moz-range-track { height: 8px; border-radius: 4px; background: var(--lp-track, var(--rule)); }
+.lp-slider::-webkit-slider-thumb { -webkit-appearance: none; width: 20px; height: 20px; margin-top: -6px; border-radius: 50%; background: var(--surface); border: 2px solid var(--ink); box-shadow: 0 1px 3px rgba(0,0,0,.25); }
+.lp-slider::-moz-range-thumb { width: 16px; height: 16px; border-radius: 50%; background: var(--surface); border: 2px solid var(--ink); }
+.lp-note { margin: 2px 0 0; font-size: 12px; color: var(--ink-2); }
+.lp-sub { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin: 8px 0 6px; font-weight: 700; font-size: 13px; }
+.lp-sub small { font-weight: 400; font-size: 11.5px; color: var(--ink-2); }
+.lp-rooms { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; }
+.lp-room {
+  appearance: none; cursor: pointer; border: 1px solid var(--rule); background: var(--surface); border-radius: 10px;
+  padding: 6px 8px; display: grid; grid-template-columns: 14px 1fr; column-gap: 7px; align-items: center; text-align: left; min-width: 0;
+}
+.lp-room:hover { background: var(--surface-2); }
+.lp-name { font-size: 12.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.lp-room small { grid-column: 2; font-size: 10.5px; line-height: 1.1; color: var(--ink-2); min-height: 11px; }
+.lp-bulb { grid-row: span 2; width: 12px; height: 12px; border-radius: 50%; border: 1.5px solid var(--ink-2); }
+.lp-room[aria-pressed="true"] { border-color: color-mix(in srgb, var(--oak) 55%, var(--rule)); background: color-mix(in srgb, #f3c77b 16%, var(--surface)); }
+.lp-room[aria-pressed="true"] .lp-bulb { background: #f2bf62; border-color: #d99a2b; box-shadow: 0 0 6px 1px rgba(242, 191, 98, .7); }
+.lp-empty { margin: 0; font-size: 12.5px; color: var(--ink-2); }
+.lp-all { display: flex; gap: 6px; margin-top: 10px; }
+.lp-all .btn { flex: 1; padding: 7px 8px; font-size: 12.5px; }
+.stage.empty .lights-btn, .stage.empty .lights-pop { display: none; }
+
 .tape-bar, .view-chip {
   position: absolute; left: 50%; transform: translateX(-50%); z-index: 4;
   display: flex; align-items: center; gap: 8px; max-width: calc(100% - 24px);
@@ -467,6 +511,8 @@ h1 a:hover { color: var(--oak); }
   .mode { padding: 7px 12px; font-size: 12.5px; }
   .recenter { top: max(10px, var(--safe-t)); right: max(12px, env(safe-area-inset-right, 0px)); }
   .tape-btn { top: calc(max(10px, var(--safe-t)) + 46px); right: max(12px, env(safe-area-inset-right, 0px)); }
+  .lights-btn { top: calc(max(10px, var(--safe-t)) + 92px); right: max(12px, env(safe-area-inset-right, 0px)); }
+  .lights-pop { top: max(10px, var(--safe-t)); right: calc(max(12px, env(safe-area-inset-right, 0px)) + 52px); max-height: calc(100% - 20px); }
   .view-chip { top: calc(max(10px, var(--safe-t)) + 48px); }
   .minimap { width: 150px; height: 104px; right: max(12px, env(safe-area-inset-right, 0px)); bottom: 12px; }
   .joystick { width: 96px; height: 96px; bottom: 14px; left: 14px; }
@@ -531,10 +577,11 @@ h1 a:hover { color: var(--oak); }
   .mode { flex: 1; justify-content: center; padding: 9px 8px; font-size: 13px; }
   .recenter { right: 12px; top: max(12px, var(--safe-t)); width: 42px; height: 42px; }
   .tape-btn { right: 12px; top: calc(max(12px, var(--safe-t)) + 52px); width: 42px; height: 42px; }
+  .lights-btn { right: 12px; top: calc(max(12px, var(--safe-t)) + 104px); width: 42px; height: 42px; }
+  .lights-pop { left: 12px; right: 64px; width: auto; top: calc(max(12px, var(--safe-t)) + 52px); max-height: calc(100% - 52px - var(--sheet-peek) - var(--safe-b) - 28px); padding: 10px 12px 12px; }
   .tape-bar { bottom: calc(var(--sheet-peek) + var(--safe-b) + 12px); }
   .view-chip { top: calc(max(12px, var(--safe-t)) + 54px); left: 12px; transform: none; max-width: calc(100% - 78px); }
-  .minimap { right: 12px; top: calc(max(12px, var(--safe-t)) + 104px); bottom: auto; width: 150px; height: 104px; }
-  .stage.visitor .minimap { top: calc(max(12px, var(--safe-t)) + 112px); }
+  .minimap { right: 12px; top: calc(max(12px, var(--safe-t)) + 156px); bottom: auto; width: 150px; height: 104px; }
   .scalebar { bottom: calc(var(--sheet-peek) + var(--safe-b) + 14px); }
   .hint { bottom: auto; top: calc(max(12px, var(--safe-t)) + 56px); max-width: calc(100% - 190px); left: 12px; transform: none; text-align: left; border-radius: 12px; }
   .joystick { bottom: calc(var(--sheet-peek) + var(--safe-b) + 20px); }
@@ -788,6 +835,28 @@ h1 a:hover { color: var(--oak); }
     <button class="icon-btn tape-btn" id="tapeBtn" aria-label="Tape measure" aria-pressed="false" title="Tape measure">
       <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2" y="6.5" width="16" height="7" rx="1.5"/><path d="M5 6.5v2.5M8 6.5v3.5M11 6.5v2.5M14 6.5v3.5"/></svg>
     </button>
+    <button class="icon-btn lights-btn" id="lightsBtn" aria-label="Lights and time of day" aria-expanded="false" aria-controls="lightsPop" title="Lights and time of day">
+      <svg class="i-sun" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="10" cy="10" r="3.4"/><path d="M10 2v2.2M10 15.8V18M2 10h2.2M15.8 10H18M4.3 4.3l1.6 1.6M14.1 14.1l1.6 1.6M4.3 15.7l1.6-1.6M14.1 5.9l1.6-1.6"/></svg>
+      <svg class="i-moon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M16 12.4A6.5 6.5 0 0 1 7.6 4a6.5 6.5 0 1 0 8.4 8.4z"/></svg>
+    </button>
+    <div class="lights-pop" id="lightsPop" role="dialog" aria-label="Lights and time of day" hidden>
+      <div class="lp-head">
+        <span class="lp-title">Time of day</span>
+        <output class="lp-clock" id="lpClock"></output>
+        <button class="btn lp-now" id="lpNow" aria-pressed="true" title="Follow your clock">Now</button>
+        <button class="lp-x" id="lpClose" aria-label="Close"><svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 3l8 8M11 3l-8 8"/></svg></button>
+      </div>
+      <input class="lp-slider" id="lpTime" type="range" min="0" max="1440" step="5" aria-label="Time of day">
+      <p class="lp-note" id="lpNote" hidden>Plan keeps even daylight. Dollhouse and Walk follow the time.</p>
+      <div class="lp-sub"><span>Ceiling lights</span><small>Auto: on while it's dark out</small></div>
+      <div class="lp-rooms" id="lpRooms"></div>
+      <p class="lp-empty" id="lpEmpty" hidden>No ceiling lights in this unit.</p>
+      <div class="lp-all">
+        <button class="btn" data-all="on">All on</button>
+        <button class="btn" data-all="off">All off</button>
+        <button class="btn" data-all="auto" title="On while it's dark outside">Auto</button>
+      </div>
+    </div>
     <div class="view-chip" id="viewChip" hidden>
       <span class="tag">View only</span>
       <span id="viewChipText"></span>

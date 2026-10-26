@@ -5,16 +5,34 @@ import { Batch, rng } from './kit.js';
 // above it, brick mid-rises across the street, low flat-roofed houses and trees
 // beyond, a few towers far off, and the sky. Laid out around the unit's
 // outline (U.bounds) and its floor (U.level), from a seed taken from the unit,
-// so a unit always looks out on the same street.
+// so a unit always looks out on the same street. The time of day
+// (src/lighting.js) colors the sky and lights windows across the street at
+// night, through setOutdoor.
 
 const FLOOR_TO_FLOOR = 13.3;   // the street sits this far below per floor up
 
+// Night windows: lit ones in warm and cool whites, the rest dark.
+const LIT = ['#ffd9a0', '#ffe7c2', '#ffcf8a', '#fff1dc', '#dfe8ff'];
+
+function canvasTexture(c, repeat) {
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.repeat.set(...repeat);
+  return t;
+}
+
+// A brick facade, and its night glow: the same windows, about a third lit.
 function facadeTexture({ brick, mortar, glass, frame, floors = 3, cols = 4, seed = 1, ac = true }) {
   const S = 512; // 32' x 32'
   const c = document.createElement('canvas');
   c.width = c.height = S;
   const g = c.getContext('2d');
-  const rand = rng(seed);
+  const n = document.createElement('canvas');
+  n.width = n.height = 128;
+  const ng = n.getContext('2d');
+  ng.fillStyle = '#000'; ng.fillRect(0, 0, 128, 128);
+  const rand = rng(seed), lit = rng(seed + 101);
   g.fillStyle = mortar; g.fillRect(0, 0, S, S);
   const bh = 6, bw = 16;
   for (let y = 0; y < S; y += bh) {
@@ -33,40 +51,59 @@ function facadeTexture({ brick, mortar, glass, frame, floors = 3, cols = 4, seed
     g.fillStyle = 'rgba(255,255,255,0.12)'; g.fillRect(x, y, w, h * 0.35);
     g.fillStyle = frame; g.fillRect(x + w / 2 - 2, y, 4, h);
     if (ac && rand() < 0.3) { g.fillStyle = '#d9d7d2'; g.fillRect(x + w * 0.1, y + h * 0.62, w * 0.42, h * 0.3); }
+    if (lit() < 0.42) {
+      ng.globalAlpha = 0.45 + lit() * 0.55;
+      ng.fillStyle = LIT[Math.floor(lit() * LIT.length)];
+      ng.fillRect(x / 4, y / 4, w / 4, h / 4);
+    }
   }
-  const t = new THREE.CanvasTexture(c);
-  t.colorSpace = THREE.SRGBColorSpace;
-  t.wrapS = t.wrapT = THREE.RepeatWrapping;
-  t.repeat.set(1 / 32, 1 / 32);
-  return t;
+  return { map: canvasTexture(c, [1 / 32, 1 / 32]), glow: canvasTexture(n, [1 / 32, 1 / 32]) };
 }
 
 function towerTexture() {
   const c = document.createElement('canvas');
   c.width = 256; c.height = 512;
   const g = c.getContext('2d');
-  const rand = rng(77);
+  const n = document.createElement('canvas');
+  n.width = 256; n.height = 512;
+  const ng = n.getContext('2d');
+  ng.fillStyle = '#000'; ng.fillRect(0, 0, 256, 512);
+  const rand = rng(77), lit = rng(78);
   g.fillStyle = '#c9b48f'; g.fillRect(0, 0, 256, 512);
   for (let y = 4; y < 512; y += 16) for (let x = 6; x < 256; x += 21) {
     g.fillStyle = rand() < 0.1 ? '#8c99a3' : '#5f6d78';
     g.fillRect(x, y, 13, 9);
+    if (lit() < 0.3) {
+      ng.globalAlpha = 0.4 + lit() * 0.6;
+      ng.fillStyle = LIT[Math.floor(lit() * LIT.length)];
+      ng.fillRect(x, y, 13, 9);
+    }
   }
-  const t = new THREE.CanvasTexture(c);
-  t.colorSpace = THREE.SRGBColorSpace;
-  t.wrapS = t.wrapT = THREE.RepeatWrapping;
-  t.repeat.set(1 / 60, 1 / 120);
-  return t;
+  return { map: canvasTexture(c, [1 / 60, 1 / 120]), glow: canvasTexture(n, [1 / 60, 1 / 120]) };
 }
 
+// The sky: a gradient up from the horizon, the sun's disc and glow, and the
+// moon. Colors and directions come from setOutdoor.
 function skyDome() {
   const geo = new THREE.SphereGeometry(4500, 32, 16);
   const mat = new THREE.ShaderMaterial({
     side: THREE.BackSide, depthWrite: false, fog: false,
-    uniforms: { top: { value: new THREE.Color(0x5f97d0) }, horizon: { value: new THREE.Color(0xdde9f1) }, ground: { value: new THREE.Color(0xb9b8b2) } },
+    uniforms: {
+      top: { value: new THREE.Color(0x5f97d0) }, horizon: { value: new THREE.Color(0xdde9f1) }, ground: { value: new THREE.Color(0xb9b8b2) },
+      sunDir: { value: new THREE.Vector3(0, 1, 0) }, sunColor: { value: new THREE.Color(0xfff0dc) }, sunAmt: { value: 0 },
+      moonDir: { value: new THREE.Vector3(0, 1, 0) }, moonAmt: { value: 0 },
+    },
     vertexShader: 'varying vec3 vDir; void main(){ vDir = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
     fragmentShader: `uniform vec3 top; uniform vec3 horizon; uniform vec3 ground; varying vec3 vDir;
-      void main(){ float h = vDir.y; vec3 c = h > 0.0 ? mix(horizon, top, pow(h, 0.55)) : mix(horizon, ground, min(1.0, -h * 6.0));
-      gl_FragColor = vec4(c, 1.0); }`,
+      uniform vec3 sunDir; uniform vec3 sunColor; uniform float sunAmt; uniform vec3 moonDir; uniform float moonAmt;
+      void main(){ vec3 d = normalize(vDir); float h = d.y;
+        vec3 c = h > 0.0 ? mix(horizon, top, pow(h, 0.55)) : mix(horizon, ground, min(1.0, -h * 6.0));
+        float s = max(dot(d, sunDir), 0.0), up = step(-0.01, h);
+        c += sunColor * sunAmt * up * (0.18 * pow(s, 10.0) + 0.45 * pow(s, 160.0) + 2.0 * smoothstep(0.99985, 0.99992, s));
+        float m = max(dot(d, moonDir), 0.0);
+        c += vec3(0.2, 0.24, 0.32) * moonAmt * up * 0.18 * pow(m, 30.0);
+        c = mix(c, vec3(0.82, 0.84, 0.88), moonAmt * up * smoothstep(0.99978, 0.99986, m));
+        gl_FragColor = vec4(c, 1.0); }`,
   });
   const m = new THREE.Mesh(geo, mat);
   m.frustumCulled = false;
@@ -79,11 +116,13 @@ let shared = null;
 function materials() {
   if (shared) return shared;
   const std = (o) => new THREE.MeshStandardMaterial({ roughness: 0.9, ...o });
+  // Lit windows are an emissive map from the start, so night only turns it up.
+  const lit = ({ map, glow }, o = {}) => std({ map, emissiveMap: glow, emissive: 0xffffff, emissiveIntensity: 0, ...o });
   shared = {
     bricks: [
-      std({ map: facadeTexture({ brick: [12, 52, 42], mortar: '#b9a99a', glass: '#3c4650', frame: '#e9e6df', seed: 3 }) }),
-      std({ map: facadeTexture({ brick: [18, 48, 46], mortar: '#c4b5a5', glass: '#46505a', frame: '#d8d3c8', floors: 3, cols: 5, seed: 8 }) }),
-      std({ map: facadeTexture({ brick: [8, 40, 36], mortar: '#a8988a', glass: '#323a42', frame: '#cfc9be', seed: 13, ac: false }) }),
+      lit(facadeTexture({ brick: [12, 52, 42], mortar: '#b9a99a', glass: '#3c4650', frame: '#e9e6df', seed: 3 })),
+      lit(facadeTexture({ brick: [18, 48, 46], mortar: '#c4b5a5', glass: '#46505a', frame: '#d8d3c8', floors: 3, cols: 5, seed: 8 })),
+      lit(facadeTexture({ brick: [8, 40, 36], mortar: '#a8988a', glass: '#323a42', frame: '#cfc9be', seed: 13, ac: false })),
     ],
     roof: std({ color: 0x9a9893 }),
     roofLight: std({ color: 0xc9c7c1 }),
@@ -92,10 +131,22 @@ function materials() {
     trees: [std({ color: 0x6f8a4c }), std({ color: 0x8a9a52 })],
     trunk: std({ color: 0x5b4a3a }),
     ground: std({ color: 0x8e8c86 }),
-    tower: std({ map: towerTexture(), roughness: 0.7 }),
+    tower: lit(towerTexture(), { roughness: 0.7 }),
     sky: skyDome(),
   };
   return shared;
+}
+
+// The time of day outside: the sky's colors, the directions to the sun and
+// moon (unit vectors) and how much of each shows, and how dark it is (0 day,
+// 1 night) for the lit windows.
+export function setOutdoor({ top, horizon, ground, sunDir, sunColor, sunAmt, moonDir, moonAmt, night }) {
+  const S = materials(), u = S.sky.material.uniforms;
+  u.top.value.copy(top); u.horizon.value.copy(horizon); u.ground.value.copy(ground);
+  u.sunDir.value.copy(sunDir); u.sunColor.value.copy(sunColor); u.sunAmt.value = sunAmt;
+  u.moonDir.value.copy(moonDir); u.moonAmt.value = moonAmt;
+  for (const m of S.bricks) m.emissiveIntensity = night * 1.6;
+  S.tower.emissiveIntensity = night * 1.3;
 }
 
 // A number from the unit's outline and floor, so the same unit gets the same street.

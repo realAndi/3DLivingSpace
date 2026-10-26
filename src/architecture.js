@@ -168,16 +168,10 @@ function buildSlab({ U, M, floors }) {
   }
 }
 
-// Ceilings for indoor rooms at their own heights, and the recessed cans.
-function buildCeilings({ U, M, H, ceil }) {
+// Ceilings for indoor rooms at their own heights. The recessed cans in them
+// are src/lighting.js's: they switch on and off by room.
+function buildCeilings({ U, M, ceil }) {
   for (const r of U.rooms) if (!r.outdoor) ceil.add(shapeGeo(r.poly, r.ceiling, false), M.ceiling);
-  for (const [x, z] of U.lights) {
-    const room = U.roomAt(x, z);
-    if (room?.outdoor || (!room && U.isWallAt(x, z))) continue;
-    const h = room?.ceiling ?? H.ceiling;
-    ceil.cyl(M.trim, x, h - 0.02, z, 0.3, 0.02, 32);
-    ceil.cyl(M.canLight, x, h - 0.026, z, 0.23, 0.008, 32);
-  }
 }
 
 // ---------------------------------------------------------------------------
