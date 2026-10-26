@@ -15,7 +15,7 @@ import { join, dirname, posix } from 'node:path';
 const ENTRIES = ['src/main.js', 'src/claude-store.js'];
 const TEXTURE_SIZES = ['512', '1024'];
 // Pictures a unit can point at (src/unit.js planImage): the example's floor plan.
-const PICTURES = ['assets/floorplan.png'];
+export const PICTURES = ['assets/floorplan.png'];
 const esc = (s) => String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]);
 export const pageTitle = (title) => `<title>${esc(title || '3D Living Space')}</title>`;
 

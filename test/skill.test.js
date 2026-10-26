@@ -319,6 +319,46 @@ test('skill: bundle, push and pull keep the Artifact\'s files and database in st
   assert.match((await w.cli(['pull', '--from', join(w.dir, 'missing')])).err, /doesn't exist/);
 });
 
+test('skill: the example ships its floor plan, nobody else\'s; a plan with the floor plan over it; the page in one file', async () => {
+  const ex = workDir('pictures-example');
+  await ex.ok(['new', '--example']);
+  const exBundle = await ex.ok(['bundle']);
+  assert.ok(exBundle.publish.files.some((f) => f.path === 'assets/floorplan.png'));
+  // A unit of anyone's own never carries the example's picture, even into a dir that had it.
+  const own = workDir('pictures-own');
+  await own.ok(['new']);
+  await own.tool('build_unit', SMALL);
+  const out = join(own.dir, 'out');
+  cpSync(join(ex.ws, 'artifact'), out, { recursive: true });
+  const ownBundle = await own.ok(['bundle', '--out', out]);
+  assert.ok(!ownBundle.publish.files.some((f) => f.path.startsWith('assets/') && !f.path.startsWith('assets/tex/')));
+  assert.ok(!existsSync(join(out, 'assets/floorplan.png')));
+  assert.match(readFileSync(join(out, 'index.html'), 'utf8'), /^<title>Test flat<\/title>/);
+
+  // The leasing plan laid over the example's drawing, at its scale and origin.
+  await ex.ok(['render_plan', '--out', join(ex.dir, 'plain.png')]);
+  const said = await ex.ok(['render_plan', '--out', join(ex.dir, 'over.png'), '--overlay', join(ROOT, 'assets/floorplan.png'), '--overlay-scale', '2.155', '--overlay-origin', '91,60']);
+  assert.match(said, /with the floor plan laid over it/);
+  const [a, b] = [readFileSync(join(ex.dir, 'plain.png')), readFileSync(join(ex.dir, 'over.png'))];
+  assert.deepEqual(pngSize(a), pngSize(b));
+  assert.ok(!a.equals(b));
+  const half = await ex.cli(['render_plan', '--overlay', join(ROOT, 'assets/floorplan.png')]);
+  assert.equal(half.code, 1);
+  assert.match(half.err, /--overlay-scale/);
+
+  // One file: every module in the import map under a bare name, the unit inside.
+  const single = await own.ok(['bundle', '--single']);
+  const html = readFileSync(single.file, 'utf8');
+  assert.match(html, /^<!doctype html>/);
+  assert.match(html, /window\.LIVING_SPACE_SNAPSHOT = \{"title":"","author":"","unit":\{"name":"Test flat"/);
+  const map = JSON.parse(/<script type="importmap">([\s\S]*?)<\/script>/.exec(html)[1]).imports;
+  for (const rel of moduleGraph(ROOT)) {
+    const code = Buffer.from(map[`living-space/${rel}`].split(',')[1], 'base64').toString();
+    assert.doesNotMatch(code, /from\s*['"]\.{1,2}\/|import\(\s*['"]\.{1,2}\//, rel);
+  }
+  assert.ok(html.includes("import 'living-space/src/main.js'"));
+});
+
 test('skill: as a command: results on stdout, an error on stderr with exit 1, JSON and results on stdin', () => {
   const dir = join(scratch, 'process');
   mkdirSync(dir);
@@ -408,5 +448,6 @@ test('skill: the packaged skill runs on its own, with no node_modules and nothin
   assert.ok(isPng(png) && pngSize(png)[0] >= 900);
   const b = space('bundle');
   assert.ok(existsSync(join(work, 'living-space/artifact/src/main.js')));
-  assert.equal(b.files, all.filter((f) => f.startsWith('app/')).length + 1);
+  // The app's files and the snapshot; not the example's floor plan, which this unit doesn't show.
+  assert.equal(b.files, all.filter((f) => f.startsWith('app/') && f !== 'app/assets/floorplan.png').length + 1);
 });

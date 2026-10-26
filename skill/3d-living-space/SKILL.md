@@ -54,28 +54,41 @@ north, 270 east.
 1. Look at everything the person shared. Note the room sizes printed on the plan,
    the north arrow, where doors swing, what the photos show of heights, the kitchen's
    cabinet order and the finishes. Run `get_catalog` once.
-2. **Rooms are the clear floor inside the walls.** Use the printed sizes (width ×
-   length, wall to wall). Where two rooms share a wall, leave the wall's thickness
-   between their outlines (interior walls are about 4.5 in); where rooms are open to
-   each other (a kitchen open to the living room), let the outlines touch. Outside
-   walls are added around everything (`exterior_wall` thick). Lay rooms out by adding
-   up sizes and wall thicknesses along each row of rooms, using the plan's
-   proportions to place them; don't rely on reading pixel positions alone. Give each
-   room its `plan_size` as printed, so the check catches a wrong outline.
-3. **Call `build_unit`** with the rooms; the doors and windows, each placed by its
+2. **Get the scale, then measure.** Plans print sizes for a few rooms only. Work out
+   the plan's pixels per inch from those (a printed size is wall to wall, in either
+   order), check it against a second room, then measure everything else (closets,
+   halls, baths, door and window positions) off the picture with that scale.
+3. **Rooms are the clear floor inside the walls.** Where two rooms share a wall,
+   leave the wall's thickness between their outlines (interior walls are about
+   4.5 in); where rooms are open to each other (a kitchen open to the living room),
+   let the outlines touch. Outside walls are added around everything
+   (`exterior_wall` thick). Lay rooms out by adding up sizes and wall thicknesses
+   along each row of rooms, using the plan's proportions to place them. Give a
+   rectangular room its `plan_size` as printed and the check compares its outline
+   with it; for an L-shaped room, compare by eye.
+4. **Call `build_unit`** with the rooms; the doors and windows, each placed by its
    center point in its wall plus its width (doors take `hinge` and `opens` as compass
    directions: which end the hinges are on, which way it swings); and the fixtures:
    the kitchen as `kitchen-run` fixtures listing cabinets and appliances left to right
-   as you face them, bath fixtures (toilet, vanity, tub or shower), laundry, closet
-   rods. Set the ceiling height, door height, window sill and head; the photos often
-   show them (doors are usually 80 in tall).
-4. **Look at `render_plan`** next to the floor plan, every time. Fix positions and
-   sizes with `edit_unit` (only what you pass changes), and fix every problem that
-   `build_unit`, `edit_unit` and `check_unit` report. Repeat until the plan matches
-   and nothing is reported.
-5. Set the finishes from the photos: floors per room, wall paint, cabinets, counters,
-   backsplash, appliances, hardware. Set `north` from the plan's north arrow so the sun
-   comes in the right windows. Name it with `set_info` or the `name` setting.
+   as you face them (list the parts that matter: the width left over becomes base
+   cabinet by itself, while a `base` with no width is a 24 in one), bath fixtures
+   (toilet, vanity, tub or shower), laundry, closet rods. Set the ceiling height, door
+   height, window sill and head; the photos often show them (doors are usually 80 in
+   tall). `floor_level` (default 3) sets the view out of the windows.
+5. **Look at the plan** next to the floor plan, every time. Lay the floor plan over
+   the drawing to see where they disagree:
+   `render_plan --overlay <the plan picture> --overlay-scale <its pixels per inch> --overlay-origin <x,y: the pixel at your [0, 0] corner>`.
+   Fix positions and sizes with `edit_unit` (only what you pass changes), and fix
+   every problem that `build_unit`, `edit_unit` and `check_unit` report. Repeat until
+   the plan matches and nothing is reported.
+6. Set the finishes from the photos: floors per room, wall paint, cabinets, counters,
+   backsplash, appliances, hardware. Where what they describe isn't on offer (a floor's
+   exact tone, a door style), pick the closest and tell them. Set `north` from the
+   plan's north arrow so the sun comes in the right windows. Give it a title with
+   `set_info`: the page and its link show it, next to the bed and bath count, so
+   don't repeat those.
+7. Tell them what you read off the plan and what you assumed (which bedroom is the
+   primary, what a symbol is, things the plan doesn't show), so they can correct you.
 
 ## Furnish and decorate
 

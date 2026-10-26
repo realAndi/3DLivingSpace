@@ -36,7 +36,7 @@ const COMMANDS = {
   doctor: { usage: 'doctor', about: 'Check Node, where the scripts run from, and that the plan renderer and its fonts load.', flags: [] },
 };
 const BOOLEAN = new Set(['example', 'force', 'markdown', 'snapshot-only', 'single']);
-const TOOL_FLAGS = { render_plan: ['out'] };
+const TOOL_FLAGS = { render_plan: ['out', 'overlay', 'overlay-scale', 'overlay-origin'] };
 
 class Usage extends ToolError {}
 
@@ -85,19 +85,51 @@ const issuesOf = (name, error) => `Invalid arguments for ${name}:\n${error.issue
 
 const pngSize = (buf) => [buf.readUInt32BE(16), buf.readUInt32BE(20)];
 
+// A picture's size in pixels: PNG from its header, JPEG from its frame marker.
+function imageSize(buf) {
+  if (buf.subarray(1, 4).toString() === 'PNG') return { type: 'image/png', size: pngSize(buf) };
+  if (buf[0] === 0xff && buf[1] === 0xd8) {
+    for (let i = 2; i + 9 < buf.length;) {
+      if (buf[i] !== 0xff) { i++; continue; }
+      const marker = buf[i + 1], len = buf.readUInt16BE(i + 2);
+      if (marker >= 0xc0 && marker <= 0xcf && ![0xc4, 0xc8, 0xcc].includes(marker)) return { type: 'image/jpeg', size: [buf.readUInt16BE(i + 7), buf.readUInt16BE(i + 5)] };
+      i += 2 + len;
+    }
+  }
+  return null;
+}
+
+// render_plan --overlay: the floor plan laid over the drawing, placed by its
+// scale (pixels per inch) and the pixel where the unit's [0, 0] corner is.
+function overlayOf(flags, io) {
+  if (!flags.overlay) return undefined;
+  const buf = readFileSync(resolve(io.cwd, flags.overlay));
+  const img = imageSize(buf);
+  if (!img) throw new Usage('--overlay takes a PNG or JPEG picture of the floor plan.');
+  const scale = Number(flags['overlay-scale']);
+  const origin = String(flags['overlay-origin'] ?? '').split(/[\s,]+/).filter(Boolean).map(Number);
+  if (!(scale > 0) || origin.length !== 2 || !origin.every(Number.isFinite)) {
+    throw new Usage('--overlay also needs --overlay-scale <pixels per inch on that picture> and --overlay-origin <x,y: the pixel where your [0, 0] corner is>.');
+  }
+  const [w, h] = img.size, ft = (px) => px / scale / 12;
+  const x0 = -ft(origin[0]), z0 = -ft(origin[1]);
+  return { href: `data:${img.type};base64,${buf.toString('base64')}`, x0, z0, x1: x0 + ft(w), z1: z0 + ft(h) };
+}
+
 async function runTool(tool, positional, flags, work, io) {
   const parsed = z.object(tool.inputSchema).safeParse(await readArgs(positional[1], io));
   if (!parsed.success) throw new Usage(issuesOf(tool.name, parsed.error));
   let png = null;
   if (tool.name === 'render_plan') { const r = await raster(); await r.ready(); png = r.png; }
-  const out = createTools(toolContext(work, { png }))[tool.name](parsed.data);
+  const extra = tool.name === 'render_plan' ? { overlay: overlayOf(flags, io) } : undefined;
+  const out = createTools(toolContext(work, { png }))[tool.name](parsed.data, extra);
   if (!out?.image) return pretty(out);
   const file = resolve(io.cwd, flags.out ?? work.path('plan.png'));
   mkdirSync(dirname(file), { recursive: true });
   writeFileSync(file, out.image);
   const buf = Buffer.from(out.image);
   const [w, h] = pngSize(buf);
-  return `${out.text}\nPlan: ${file} (${w} × ${h} px, PNG). Open it and compare it with the floor plan.`;
+  return `${out.text}\nPlan: ${file} (${w} × ${h} px, PNG)${extra.overlay ? ', with the floor plan laid over it' : ''}. Open it and compare it with the floor plan.`;
 }
 
 const raster = () => import('./raster.mjs');
@@ -133,7 +165,7 @@ function helpList() {
     '',
     'Tools. Arguments are one JSON object: inline (\'{…}\'), a file, or - for stdin. Inches.',
     ...TOOLS.map((t) => `  ${pad(t.name, 16)}${t.title}`),
-    '  render_plan writes the picture to <work dir>/plan.png (or --out <file>).',
+    '  render_plan writes the picture to <work dir>/plan.png (or --out <file>). --overlay <floor plan picture> --overlay-scale <px per inch> --overlay-origin <x,y px of your [0, 0]> lays the plan over it, to check the tracing.',
     '',
     'Commands:',
     ...Object.values(COMMANDS).map((c) => `  ${c.usage}\n      ${c.about}`),
@@ -148,7 +180,7 @@ function helpOne(name) {
     return [
       `${tool.name}: ${tool.title}`, '', tool.description, '',
       hasInput(tool) ? `Input (JSON Schema):\n${pretty(schemaOf(tool))}` : 'No input.', '',
-      `Run: node ${SPACE} ${tool.name}${hasInput(tool) ? ' \'{…}\'' : ''} [--dir <work dir>]${tool.name === 'render_plan' ? ' [--out <file.png>]' : ''}`,
+      `Run: node ${SPACE} ${tool.name}${hasInput(tool) ? ' \'{…}\'' : ''} [--dir <work dir>]${tool.name === 'render_plan' ? ' [--out <file.png>] [--overlay <floor plan> --overlay-scale <px per inch> --overlay-origin <x,y>]' : ''}`,
     ].join('\n');
   }
   const c = COMMANDS[name];

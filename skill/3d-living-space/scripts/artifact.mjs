@@ -20,7 +20,7 @@ import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { ToolError } from '../../../src/agent.js';
 import { cleanDesign } from '../../../src/design.js';
-import { assembleApp, pageTitle } from './app.mjs';
+import { assembleApp, pageTitle, PICTURES } from './app.mjs';
 import { singleFile } from './single.mjs';
 import { writeAtomic, newDoc } from './workdir.mjs';
 
@@ -75,10 +75,14 @@ function filesUnder(dir, prefix = '') {
   }).sort();
 }
 
-// The page is named for the unit (the gallery shows its <title>).
-function writeApp(out, title) {
-  if (!isPackaged()) return assembleApp(REPO, out, { title });
-  const files = filesUnder(PACKAGED_APP);
+// The page is named for the unit (the gallery shows its <title>). A picture
+// the app carries (the example's floor plan) goes only with a unit that shows
+// it: anyone's own plan stays in the conversation.
+function writeApp(out, { title, unit }) {
+  const used = (rel) => !rel.startsWith('assets/') || rel.startsWith('assets/tex/') || unit.planImage?.src === rel;
+  for (const rel of PICTURES) rmSync(join(out, rel), { force: true });
+  if (!isPackaged()) return assembleApp(REPO, out, { title }).filter((rel) => used(rel) || (rmSync(join(out, rel), { force: true }), false));
+  const files = filesUnder(PACKAGED_APP).filter(used);
   for (const rel of files) {
     mkdirSync(dirname(join(out, rel)), { recursive: true });
     copyFileSync(join(PACKAGED_APP, rel), join(out, rel));
@@ -98,7 +102,7 @@ export function bundle(work, { out = work.path('artifact'), snapshotOnly = false
   const doc = work.load();
   const url = work.url;
   if (snapshotOnly && !url) throw new ToolError('--snapshot-only replaces the unit.json of an Artifact already published: pass --url <its URL>, or bundle without it to publish the whole app.');
-  const files = snapshotOnly ? [] : writeApp(out, doc.title || doc.unit.name).filter((f) => f !== 'index.html');
+  const files = snapshotOnly ? [] : writeApp(out, { title: doc.title || doc.unit.name, unit: doc.unit }).filter((f) => f !== 'index.html');
   writeAtomic(join(out, 'unit.json'), JSON.stringify(snapshotOf(doc)));
   files.push('unit.json');
   const bytes = [...files, ...(snapshotOnly ? [] : ['index.html'])].reduce((n, f) => n + statSync(join(out, f)).size, 0);

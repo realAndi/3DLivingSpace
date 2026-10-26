@@ -414,11 +414,12 @@ export function createTools({ current, write, built, viewUrl = null, png, before
     return { unit_problems: U.problems, pieces, pieces_with_problems: pieces.filter((p) => p.problems.length).length };
   }
 
-  // { image: PNG bytes, text }.
-  function render_plan() {
+  // { image: PNG bytes, text }. overlay (the skill's): a floor plan picture to
+  // lay over the drawing, as src/drawing.js takes it.
+  function render_plan(args, { overlay } = {}) {
     beforeRender();
     const { row, U } = current();
-    const image = png(detailSvg({ title: row.title, author: row.author, unit: row.doc.unit, items: row.doc.items, assets: row.doc.assets }, U));
+    const image = png(detailSvg({ title: row.title, author: row.author, unit: row.doc.unit, items: row.doc.items, assets: row.doc.assets, overlay }, U));
     const text = `${U.rooms.length} rooms, ${U.openings.length} doors and windows, ${U.fixtures.length} fixtures, ${row.doc.items.length} pieces of furniture.${viewUrl ? ` Open it in 3D: ${viewUrl}` : ''}`;
     return { image, text };
   }

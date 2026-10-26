@@ -281,6 +281,13 @@ function planGroup(doc, U, [bx, by, bw, bh], { detail = false } = {}) {
     out.push(text(cx, cz + size - 1, it.uid, { size: size - 1.5, mono: true, fill: ink, anchor: 'middle', halo: h }));
   }
 
+  // The floor plan being traced, laid over the drawing to check it against
+  // (the skill's render_plan --overlay): { href, x0, z0, x1, z1 } in feet.
+  const ov = detail && doc.overlay;
+  if (ov) {
+    out.push(`<image href="${esc(ov.href)}" x="${f1(ox + ov.x0 * s)}" y="${f1(oz + ov.z0 * s)}" width="${f1((ov.x1 - ov.x0) * s)}" height="${f1((ov.z1 - ov.z0) * s)}" preserveAspectRatio="none" opacity="0.6" style="mix-blend-mode:multiply"/>`);
+  }
+
   // North: where the unit says true north is (up the plan unless set).
   const [nx, ny] = [bx + bw - 18, by + 26];
   const north = U.north ?? 0;
