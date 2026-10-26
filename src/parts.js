@@ -501,9 +501,11 @@ function kitchen(P, f, ceiling) {
       P.box(s0, cd + 0.2, s1, cd + 0.335, ct - 0.68, ct - 0.07);
     }
     if (g.kind === 'fridge') {
-      const k = fridgeH / FRIDGE_H, f0 = s0 + 0.13, f1 = s1 - 0.13, split = f0 + (f1 - f0) * 0.42;
+      const k = fridgeH / FRIDGE_H, f0 = s0 + 0.13, f1 = s1 - 0.13, split = f0 + (f1 - f0) * 0.42, fz = 2.08 * k;
       P.box(f0, 0, f1, fridgeFront, 0, fridgeH);
       P.box(split - 0.19, fridgeFront, split + 0.19, fridgeFront + 0.26, 2.25 * k - 0.03, 5.25 * k);
+      // The freezer drawer's bar handle.
+      P.box(f0 + 0.32, fridgeFront, f1 - 0.32, fridgeFront + 0.26, fz - 0.36, fz - 0.3);
       if (uppers && ut - (fridgeH + 0.17) > 0.5) upper(s0, s1, fridgeH + 0.17, ut, cd);
     }
     // Tall cabinets, and their pulls (and the oven's handle) where they are.

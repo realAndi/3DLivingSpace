@@ -22,9 +22,15 @@ who can look around and make their own version.
   The address can change that unit and no other; keep it to yourself.
 - **Dollhouse, Plan and Walk views.** Walk is first person: on a computer, click
   to look around with the mouse (Esc frees the cursor), WASD or the arrow keys
-  to move, Shift to run, E to open or shut the door you're facing; on a phone,
-  drag to look, use the pad to move, tap the floor to walk there. Tap or click a
-  door (or its frame) to open or shut it. Tools sets the look speed.
+  to move, Shift to run, E to use what you're facing; on a phone, drag to look,
+  use the pad to move, tap the floor to walk there. Tools sets the look speed.
+- **Things you can use.** Doors, cabinet doors and drawers, the fridge, oven,
+  dishwasher, microwave and washer open; lamps, TVs and the room light switches
+  by each door switch; curtains and blinds open and close; ceiling fans spin.
+  E (or a click) uses what's under the crosshair, a tap uses what you tap, and a
+  small prompt says what something does when it's under the crosshair or, on a
+  phone, near the middle of the view (tap the prompt too). Open all / Close all
+  (Tools) still work the doors.
 - **Furnish.** Add pieces from a catalog of typical sizes, drag, turn, resize and
   recolor them. With *Pieces can't overlap* on (the default), a piece slides
   along and stops flush against walls, their trim (baseboards, door casings,
@@ -162,6 +168,7 @@ fixes the origin used in links.
 | `src/catalog.js`, `src/design.js` | Furniture catalog; the stored document and its checks |
 | `src/architecture.js`, `src/fixtures.js` | 3D walls, floors, ceilings, doors, windows, railings; kitchens, baths and other built-ins |
 | `src/furniture.js`, `src/layout.js` | 3D furniture and custom pieces; placing, dragging, clearances |
+| `src/interact.js` | Things you can use: doors, fixtures' doors and drawers, lamps, screens, curtains, fans, light switches; the prompts |
 | `src/sync.js` | Opening, creating, copying and saving units; live updates |
 | `src/measure.js`, `src/walk.js`, `src/units.js` | Tape measure, first-person controls, display units |
 | `src/materials.js`, `src/textures.js`, `assets/tex/` | Materials with color, normal and roughness maps: finishes drawn in code, and CC0 scans of fabric, leather, carpet, walnut, marble and concrete (sources in `assets/tex/SOURCES.md`), loaded when first used at a quality that suits the device |
