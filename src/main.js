@@ -480,6 +480,10 @@ const layout = new LayoutEditor({
   getCamera: () => activeCam(),
   getMode: () => mode,
   occluders: () => [arch?.walls, fixtures?.solid, ...doors.map((d) => d.pivot)].filter(Boolean),
+  // What dragged pieces land on and hang from, and what the Dollhouse's cutaway hides.
+  walls: () => arch?.walls ?? null,
+  builtIns: () => fixtures?.solid ?? null,
+  clipping: () => renderer.clippingPlanes,
   onSelect: (id) => { stage.classList.toggle('piece-active', id != null); if (id != null) dismissHint(); },
   onOps: (ops) => session.queue(ops),
   onAdded: () => { if (narrow()) setSheet(false); },
@@ -1035,6 +1039,7 @@ function setMode(m, { keepHash = false } = {}) {
   walk.enabled = m === 'walk';
   const inside = m === 'walk';
   applyModeVisibility();
+  layout.setView(m);
   setLighting(m);
   document.querySelectorAll('.mode').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.mode === m)));
   $('#minimap').hidden = !inside;
