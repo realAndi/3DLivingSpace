@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { CATALOG, catalogByType, SWATCHES, buildPiece, nearPiece, isFlat } from './furniture.js';
 import { KINDS, placeOf, actOf } from './catalog.js';
 import { clearances, problems, blockersFor, trimRects, collides, pushOut, slideTo, slideOnWall, onFloor } from './fit.js';
-import { descendants, carry, supportOf, surfacesAt, surfaceUnder, fitOnSurface, hangOnWall, wallProblem, ceilingAt, ceilingY, facing } from './stacking.js';
+import { descendants, carry, supportOf, surfacesAt, surfaceUnder, fitOnSurface, hangOnWall, wallProblem, walkThrough, ceilingAt, ceilingY, facing } from './stacking.js';
 import { frontOf, rightOf } from './geometry.js';
 import { cleanItem, randomId } from './design.js';
 import { fmtLen, fmtSize, fmtRug, toInput, fromInput, inputUnit, getUnits } from './units.js';
@@ -323,9 +323,10 @@ export class LayoutEditor {
   get current() { return this.items.find((x) => x.uid === this.selected) ?? null; }
 
   // Walk-mode collision: is (x, z) within r of a piece you'd walk into? Rugs,
-  // and what hangs high enough to walk under (art, pendants, fans), don't count.
+  // what hangs high enough to walk under (art, pendants, fans), and curtains
+  // away from a wall (src/stacking.js walkThrough) don't count.
   blocks(x, z, r) {
-    return this.items.some((i) => !isFlat(i, this.assets) && (i.y ?? 0) < WALK_UNDER && nearPiece(i, x, z, r));
+    return this.items.some((i) => !isFlat(i, this.assets) && (i.y ?? 0) < WALK_UNDER && nearPiece(i, x, z, r) && !walkThrough(i, this.U, this.assets));
   }
 
   // The view changed ('dollhouse', 'plan' or 'walk'). Seen from above in

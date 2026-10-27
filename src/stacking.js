@@ -203,25 +203,38 @@ export function hangOnWall(item, x, z, U, { y = item.y ?? 0, reach = 3 } = {}) {
   };
 }
 
+// The wall within 1" behind a piece's back, at each point across it: its
+// solid spans of height, or null where there's none.
+function spansBehind(item, U) {
+  const back = [-Math.sin((item.rot * Math.PI) / 180), Math.cos((item.rot * Math.PI) / 180)].map((v) => -v);
+  const right = [Math.cos((item.rot * Math.PI) / 180), Math.sin((item.rot * Math.PI) / 180)];
+  return across(item.w).map((k) => {
+    const bx = item.x + back[0] * (item.d / 2) + right[0] * k, bz = item.z + back[1] * (item.d / 2) + right[1] * k;
+    for (const t of [BEHIND, 1 / 12]) { const spans = U.wallAt(bx + back[0] * t, bz + back[1] * t); if (spans) return spans; }
+    return null;
+  });
+}
+
 // Is the piece's back against a wall that stands behind all of it? A note on
 // what's wrong, or null.
 export function wallProblem(item, U) {
   if (!U) return null;
-  const back = [-Math.sin((item.rot * Math.PI) / 180), Math.cos((item.rot * Math.PI) / 180)].map((v) => -v);
-  const right = [Math.cos((item.rot * Math.PI) / 180), Math.sin((item.rot * Math.PI) / 180)];
   const y = item.y ?? 0, sheer = actOf(item) === 'curtain';
-  let gap = false, hole = false;
-  for (const k of across(item.w)) {
-    const bx = item.x + back[0] * (item.d / 2) + right[0] * k, bz = item.z + back[1] * (item.d / 2) + right[1] * k;
-    // A wall within 1" behind the back.
-    let spans = null;
-    for (const t of [BEHIND, 1 / 12]) { spans = U.wallAt(bx + back[0] * t, bz + back[1] * t); if (spans) break; }
-    if (!spans) gap = true;
-    else if (!sheer && !covers(spans, y, y + item.h)) hole = true;
-  }
-  if (gap) return 'isn\'t against a wall';
-  if (hole) return 'hangs over a window or doorway';
+  const behind = spansBehind(item, U);
+  if (behind.some((spans) => !spans)) return 'isn\'t against a wall';
+  if (!sheer && !behind.every((spans) => covers(spans, y, y + item.h))) return 'hangs over a window or doorway';
   return null;
+}
+
+// Curtains and blinds are cloth: you walk through them. All but where one
+// hangs against wall that stands from the floor all the way across behind it
+// (in front of a window, the wall under the sill): there's nowhere to go, and
+// it keeps you out of its folds. So one hung in the middle of a room, from
+// the ceiling, or across a doorway doesn't stop you.
+export function walkThrough(item, U, assets = null) {
+  if (actOf(item, assets) !== 'curtain') return false;
+  if (item.on !== 'wall') return true;
+  return !!U && spansBehind(item, U).some((spans) => !spans || spans[0][0] > 0.05);
 }
 
 // ---------------------------------------------------------------------------

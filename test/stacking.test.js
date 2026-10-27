@@ -7,7 +7,7 @@ import { buildUnit, cleanUnit } from '../src/unit.js';
 import { cleanDesign } from '../src/design.js';
 import { catalogByType } from '../src/catalog.js';
 import { problems, blockersFor, slideOnWall, collides } from '../src/fit.js';
-import { placeByType, restOn, hangOnWall, carry, descendants, supportOf, surfacesAt } from '../src/stacking.js';
+import { placeByType, restOn, hangOnWall, walkThrough, ceilingY, carry, descendants, supportOf, surfacesAt } from '../src/stacking.js';
 
 // A 20' × 14' living room with a window centered on its north wall, a bedroom
 // door on its west wall, and a kitchen run (base cabinets under wall cabinets)
@@ -143,6 +143,29 @@ test('art hangs on a wall over a sofa; not over a window; curtains may', () => {
   assert.ok(near(back.x, art.w / 2, 0.05), `stopped at the corner (${back.x})`);
   // Straight out from the wall is no move along it.
   assert.deepEqual(slideOnWall(art, art.x, art.z + 2, U, shapes), { x: art.x, z: art.z });
+});
+
+test('curtains stop Walk only against a wall that stands from the floor; in the middle of a room you walk through', () => {
+  const hang = (type, x, z) => {
+    const c = piece(type, x, z, { y: 1 / 12 });
+    return Object.assign(c, hangOnWall(c, x, z, U), { on: 'wall' });
+  };
+  // In front of the window (the wall under its sill) and on a plain wall.
+  assert.equal(walkThrough(hang('curtains', 10, 1), U), false);
+  assert.equal(walkThrough(hang('curtains', 4, 1), U), false);
+  // Across the bedroom doorway: there's only wall above its head.
+  const door = hang('curtains', 0.2, 7);
+  assert.ok(near(door.x, door.d / 2), `hung on the living room's west wall (${door.x})`);
+  assert.equal(walkThrough(door, U), true);
+  // Standing in the middle of the room, or hung from the ceiling as a divider.
+  assert.equal(walkThrough(piece('curtains', 10, 7), U), true);
+  assert.equal(walkThrough(piece('blinds', 10, 7), U), true);
+  const divider = piece('curtains', 10, 7, { rot: 90 });
+  Object.assign(divider, { on: 'ceiling', y: ceilingY(divider, U) });
+  assert.equal(walkThrough(divider, U), true);
+  // Nothing else is cloth.
+  assert.equal(walkThrough(piece('sofa', 10, 7), U), false);
+  assert.equal(walkThrough({ ...piece('wall-art', 10, 7), on: 'wall', y: 4 }, U), false);
 });
 
 test('art above a door doesn\'t block its swing; lower down it covers the doorway', () => {
