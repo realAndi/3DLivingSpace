@@ -3,6 +3,7 @@ import { Batch } from './kit.js';
 import { buildPiece } from './furniture.js';
 import { catalogByType, SWATCHES, isFlat, nearPiece, placeOf } from './catalog.js';
 import { layoutChanges, applyChanges, samePiece, whatChanged } from './changes.js';
+import { walkThrough } from './stacking.js';
 import { fmtLen, fmtSize, getUnits } from './units.js';
 
 // Suggestions, in the browser (the server side: server/service.js; the changes
@@ -723,7 +724,7 @@ export function createSuggestions(opts) {
 
     // Walking: is (x, z) within r of a preview piece you'd walk into?
     blocks(x, z, r) {
-      return !!view && root.visible && standing.some((i) => !isFlat(i, standingAssets) && (i.y ?? 0) < WALK_UNDER && nearPiece(i, x, z, r));
+      return !!view && root.visible && standing.some((i) => !isFlat(i, standingAssets) && (i.y ?? 0) < WALK_UNDER && nearPiece(i, x, z, r) && !walkThrough(i, opts.getU(), standingAssets));
     },
   };
 }
