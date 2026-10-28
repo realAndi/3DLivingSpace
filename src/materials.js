@@ -404,10 +404,12 @@ function once(make) {
   return () => (value ??= make());
 }
 
-// The surface one tile of each newer scan covers, in feet (assets/tex/SOURCES.md).
+// The surface one tile of each newer scan covers, in feet, [u, v] where the
+// scan wasn't square (assets/tex/SOURCES.md). Jute is a burlap, scaled up to a
+// jute rug's coarser weave.
 const SCAN_FEET = {
-  velvet: 1.6, boucle: 1.6, rattan: 2, jute: 2, travertine: 6.5, slate: 6.5, granite: 6.5, terrazzo: 6.5,
-  ash: 5.9, herringbone: 6.5, hex: 3.3, zellige: 3.3,
+  velvet: [0.932, 0.897], boucle: [1.033, 1.28], rattan: 0.85, jute: 2.2, travertine: 3.94, slate: 3.3, granite: 1.64, terrazzo: 1.97,
+  ash: 3.28, herringbone: 11.15, hex: 1.48, zellige: 5.25,
 };
 
 // Gray tone maps (fabric, leather, carpet) average about this much in linear
@@ -538,9 +540,9 @@ export function createMaterials(renderer, { onChange } = {}) {
   lazy(M, 'linen', () => cloth(bedding(), 0xf3f1ec, { roughness: 0.95 }));
   lazy(M, 'duvet', () => cloth(bedding(), 0xe9e5dd, { roughness: 0.95 }));
   // Newer scans: floors, counters and tile, and woods and weaves for furniture.
-  const scan = (name, extra) => textureSet({ feet: [SCAN_FEET[name], SCAN_FEET[name]], ...extra });
+  const scan = (name, extra) => { const f = SCAN_FEET[name]; return textureSet({ feet: Array.isArray(f) ? f : [f, f], ...extra }); };
   lazy(M, 'floorHerringbone', () => pbr(scan('herringbone', { placeholder: '#a98058', relief: 0.008, detail: 0.5, rough: through(0.25, 1, 0.6, 0.62), roughAt: 0.65, make: files({ color: 'herringbone-color', height: 'herringbone-height' }) }), { roughness: 0.78 }));
-  lazy(M, 'floorHex', () => pbr(scan('hex', { placeholder: '#e9e7e2', relief: 0.01, detail: 0.5, rough: through(0.25, 1, 0.6, 0.35), roughAt: 0.4, make: files({ color: 'hex-color', height: 'hex-height' }) }), { roughness: 0.9 }));
+  lazy(M, 'floorHex', () => pbr(scan('hex', { placeholder: '#e9e7e2', relief: 0.004, detail: 0.5, rough: through(0.25, 1, 0.6, 0.35), roughAt: 0.4, make: files({ color: 'hex-color', height: 'hex-height' }) }), { roughness: 0.9 }));
   lazy(M, 'slate', () => pbr(scan('slate', { placeholder: '#4d5250', relief: 0.01, detail: 0.5, rough: through(0.3, 1, 0.7, 0.75), roughAt: 0.85, make: files({ color: 'slate-color', height: 'slate-height' }) }), { roughness: 0.85 }));
   lazy(M, 'travertine', () => pbr(scan('travertine', { placeholder: '#d6c4a6', relief: 0.006, detail: 0.5, rough: through(0.25, 1, 0.6, 0.55), roughAt: 0.6, make: files({ color: 'travertine-color', height: 'travertine-height' }) }), { roughness: 0.7 }));
   lazy(M, 'terrazzo', () => pbr(scan('terrazzo', { placeholder: '#e2dcd2', make: files({ color: 'terrazzo-color' }) }), { roughness: 0.3 }));
@@ -552,8 +554,8 @@ export function createMaterials(renderer, { onChange } = {}) {
   lazy(M, 'boucle', () => cloth(scan('boucle', { placeholder: '#e6e1d8', relief: 0.006, detail: 0.5, make: weave('boucle-tone') }), 0xe9e4da, { roughness: 1 }));
   // Velvet: its pile catches the light at grazing angles (sheen).
   lazy(M, 'velvet', () => Object.assign(new THREE.MeshPhysicalMaterial({
-    ...scan('velvet', { placeholder: '#cccccc', relief: 0.0015, detail: 0.5, make: weave('velvet-tone') }),
-    color: toned(0x4b5d4f), roughness: 0.85, sheen: 1, sheenRoughness: 0.35, sheenColor: new THREE.Color(0xb9c4b8),
+    ...scan('velvet', { placeholder: '#cccccc', relief: 0.0015, detail: 0.5, rough: true, roughAt: 0.85, make: async (q) => { const [t, r] = await Promise.all([load('velvet-tone', q), load('velvet-rough', q)]); return { color: t, height: t, rough: r }; } }),
+    color: toned(0x4b5d4f), roughness: 0.9, sheen: 1, sheenRoughness: 0.35, sheenColor: new THREE.Color(0xb9c4b8),
   }), { userData: { toned: true } }));
   // Built-in finishes drawn from recipes.
   lazy(M, 'floorChevron', () => recipeMaterial(M, preset('chevron')));

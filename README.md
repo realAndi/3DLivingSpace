@@ -37,7 +37,11 @@ skill](#as-a-claude-skill)).
   phone, near the middle of the view (tap the prompt too). Open all / Close all
   (Tools) still work the doors.
 - **Furnish.** Add pieces from a catalog of typical sizes, drag, turn, resize and
-  recolor them. With *Pieces can't overlap* on (the default), a piece slides
+  recolor them, and choose what each is made of: velvet, bouclé, linen, leather,
+  jute, oak, ash, walnut, rattan, marble, travertine, terrazzo, brass, or a texture
+  made for the unit (colors tint the weaves and leather). On a phone or tablet, the
+  **Move** button by the view decides whether a drag on a piece moves it: off (the
+  default), drags only turn the view and a tap selects; adding a piece turns it on. With *Pieces can't overlap* on (the default), a piece slides
   along and stops flush against walls, their trim (baseboards, door casings,
   window stools, at their real heights, so a coffee table slides under a sill
   that stops a sofa), built-ins and other pieces. Pieces collide by their real
@@ -65,6 +69,15 @@ skill](#as-a-claude-skill)).
   surfaces (heights too) in Dollhouse and Walk.
 - **Units:** Feet & inches, Inches, or Centimeters (Tools tab), per browser.
 - **Textures:** Auto picks a lighter set on phones; Tools can set Low or High, per browser.
+- **Finishes that match the real place.** Besides the built-in floors, counters,
+  backsplashes and tile, Claude can design a texture to match a photo of the real
+  surface: `create_texture` takes a recipe (`src/recipes.js`): a pattern of pieces at
+  real sizes (planks, tiles, herringbone, chevron, basketweave, hexagons, checker,
+  stripes, plaid) with grain, veins, chips, pits, weave and mottling drawn into each,
+  and hands back a picture of it beside the photo, with measured colors and contrast
+  and what to change, until they match. The unit keeps it as `tex:<id>` for floors,
+  finishes, cabinets and pieces. As an Artifact, editors also get *Match a photo*:
+  their own Claude designs it from a photo they pick, scoring each try in the page.
 - **Share.** The unit's link (`/u/<id>`) is view-only for everyone else, with a
   *Make your own version* button that copies it. Your browser keeps the edit key
   of the units it made; the edit link (`/u/<id>#edit=<key>`) works on any device.
@@ -97,13 +110,17 @@ piece faces south.
 | `set_info` | Title and author |
 | `place_items` / `update_items` / `remove_items` | Furniture: on the floor, on a piece or counter (`on`), on a wall at a height (`elevation`), or from the ceiling; what rests on a piece moves and goes with it |
 | `create_asset` | A custom 3D piece from boxes, cylinders, cones and spheres, with where it goes, what it is, and a bulb for lamps |
+| `create_texture` | A texture designed to match a photo of a real floor, counter, tile or fabric, as a recipe; returns its preview to compare with the photo, and uses it where `apply_to` says |
 | `find_spots` | Where a footprint fits, optionally against a wall |
 | `check_unit` | The unit's problems, and each piece's clear floor and problems |
 | `render_plan` | A labeled top-down picture with inch coordinates, to compare with the floor plan |
 
+On the command line, `create_texture --sample <photo> --crop x,y,w,h` measures the
+texture against that part of the photo and draws them side by side.
+
 ## As a Claude skill
 
-The skill gives Claude the same twelve tools as scripts it runs itself, and
+The skill gives Claude the same thirteen tools as scripts it runs itself, and
 publishes the result as an Artifact: the whole 3D app, served by claude.ai, with
 nothing on this server and no MCP connector. The person shares their floor plan
 and photos in a conversation; Claude builds the unit, checks it against the plan,
@@ -198,9 +215,12 @@ same thing from it:
   laundry, closets, fireplaces and more.
 - **Finishes:** wall paint, floors per room, cabinets, counters, backsplash,
   appliances, hardware, tile.
+- **Textures:** recipes made for the unit (`textures`), named as `tex:<id>` by a
+  finish, a room's floor, a fixture's color or a piece's material. Inches, like the
+  rest; whatever names one the unit lacks goes back to its default.
 - **North:** which way true north points on the plan, for the sun.
 
-Placed pieces are `{uid, type, w, d, h, x, z, rot, color, asset?}` in feet, plus,
+Placed pieces are `{uid, type, w, d, h, x, z, rot, color, material?, asset?}` in feet, plus,
 off the floor, `y` (the height of the underside) and `on` (`wall`, `ceiling`,
 `p:<uid>` for a piece, `f:<id>` for a fixture). `src/stacking.js` puts them
 there and moves what rests on a piece with it; collisions and checks
@@ -276,7 +296,9 @@ fixes the origin used in links.
 | `src/claude-store.js`, `src/together.js` | As an Artifact: the unit in the Artifact's database, your own version, suggestions; who else is walking through, and handing a piece to Claude |
 | `src/tools.js`, `src/agent.js`, `src/drawing.js` | The agent's tools, shared by the MCP server and the skill: what they take (zod), what they do, and the plan they draw |
 | `src/measure.js`, `src/walk.js`, `src/units.js` | Tape measure, first-person controls, display units |
-| `src/materials.js`, `src/textures.js`, `assets/tex/` | Materials with color, normal and roughness maps: finishes drawn in code, and CC0 scans of fabric, leather, carpet, walnut, marble and concrete (sources in `assets/tex/SOURCES.md`), loaded when first used at a quality that suits the device |
+| `src/materials.js`, `src/textures.js`, `assets/tex/` | Materials with color, normal and roughness maps: finishes drawn in code or from recipes, and CC0 scans of fabrics (velvet, bouclé, linen, jute), leather, carpet, woods (walnut, ash, herringbone oak, rattan), stone (marble, travertine, slate, granite, terrazzo), tile (hex, zellige) and concrete (sources in `assets/tex/SOURCES.md`), loaded when first used at a quality that suits the device |
+| `src/recipes.js`, `src/png.js` | Textures as recipes: cleaning them, drawing them the same in the browser, the server and the skill, built-in ones, and measuring a picture against a photo; PNGs for the agent's previews |
+| `src/match.js` | As an Artifact: *Match a photo*, the viewer's Claude designing a texture from their photo |
 | `src/surroundings.js` | The view out the windows, by day and by night |
 | `src/lighting.js`, `src/lightpanel.js` | The sun, sky and exposure by time of day; room lights, switches and lamps on a fixed pool of real lights; the lights panel |
 | `server/` | HTTP server, units API, per-unit MCP servers, plan pictures (`render.js`, IBM Plex fonts under the OFL) |

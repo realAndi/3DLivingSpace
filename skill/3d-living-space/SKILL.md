@@ -38,8 +38,8 @@ node $S/space.mjs render_plan             # writes living-space/plan.png: open i
 ```
 
 The tools are `get_unit`, `get_catalog`, `build_unit`, `edit_unit`, `set_info`,
-`place_items`, `update_items`, `remove_items`, `create_asset`, `find_spots`,
-`check_unit` and `render_plan`. Read `help <tool>` (or `references/tools.md`, where
+`place_items`, `update_items`, `remove_items`, `create_asset`, `create_texture`,
+`find_spots`, `check_unit` and `render_plan`. Read `help <tool>` (or `references/tools.md`, where
 it exists) before a tool's first call: every field says its unit and default. Most
 outputs end with a `next` that says what to do after.
 
@@ -84,13 +84,44 @@ north, 270 east.
    every problem that `build_unit`, `edit_unit` and `check_unit` report. Repeat until
    the plan matches and nothing is reported.
 6. Set the finishes from the photos: floors per room, wall paint, cabinets, counters,
-   backsplash, appliances, hardware. Where what they describe isn't on offer (a floor's
-   exact tone, a door style), pick the closest and tell them. Set `north` from the
+   backsplash, appliances, hardware. `get_catalog` lists the built-in ones (herringbone
+   and chevron oak, hex and checkerboard tile, travertine, slate, terrazzo, granite,
+   soapstone, zellige and more). Where none looks like the real thing, make one that
+   does with `create_texture` (below). Where something else isn't on offer (a door
+   style), pick the closest and tell them. Set `north` from the
    plan's north arrow so the sun comes in the right windows. Give it a title with
    `set_info`: the page and its link show it, next to the bed and bath count, so
    don't repeat those.
 7. Tell them what you read off the plan and what you assumed (which bedroom is the
    primary, what a symbol is, things the plan doesn't show), so they can correct you.
+
+## Textures that match the photos
+
+`create_texture` designs a surface as a recipe: a pattern of pieces at their real
+sizes in inches (planks, tiles, herringbone, chevron, basketweave, hexagons, checker,
+stripes, plaid, or none for a slab or a fabric), each piece taking one of a few close
+colors, with layers drawn into every piece (wood grain, marble veins, chips, pits,
+grit, weave, mottling) and a finish (roughness, relief, sheen). The unit keeps it,
+and anything takes it as `tex:<id>`: a finish, a room's `floor`, a fixture's
+`color`, a piece's `material`, a custom part's `material`. `apply_to` uses it at once.
+`get_catalog`'s `texture_examples` are good recipes to start from.
+
+1. Read the surface off the photo: the pattern, and its sizes against something you
+   know (a counter is 25 in deep, a door 80 in tall, a standard tile 12 in); the base,
+   two to four piece colors a little apart, the joint color; what's on each piece.
+2. Make it, measured against the photo: `create_texture <recipe> --sample <photo>
+   --crop x,y,w,h`, the crop boxing just that surface (pixels, or fractions of the
+   photo like `0.1,0.55,0.3,0.3`). It writes `texture-<id>.png` (the surface 60 in
+   across as it lies, a close-up, and the photo) and answers with a 0 to 100 `match`,
+   both palettes and hints like "lighter than the photo by 6". Open the picture.
+3. Adjust with `texture_id` until colors, contrast and the size of the pieces agree;
+   three or four rounds is usual. Lighting in photos runs warm and dark: match the
+   surface, not the shadow. Tell them it's an approximation they can refine in the
+   page.
+
+In the page, editors have *Match a photo* too (in Rooms, and for a selected piece):
+their own Claude designs the texture from a photo they pick, the same way, and the
+page saves it into the unit, where your next `pull` brings it.
 
 ## Furnish and decorate
 
@@ -102,6 +133,11 @@ their parts do, at the same height, so tuck them in the way real furniture goes:
 dining chair's seat under the table up to its back (about 19 in for the catalog
 chair), a desk chair under the desk, stools under an island's overhang, a lamp's
 shade over a sofa's arm, a table in a sectional's open corner.
+
+A piece takes a `color` and a `material`: what its main part is made of, from
+`get_catalog`'s `furniture_materials` (velvet, bouclé, linen, leather, jute, oak, ash,
+walnut, rattan, marble, travertine, terrazzo, brass…) or one of the unit's textures.
+A color tints the woven ones and leather; wood, stone and textures show their own.
 
 Every catalog piece has a placement. Floor pieces stand on the floor. Surface pieces
 (table lamps, books, a vase, plates, a laptop, a coffee maker) rest on a placed piece
@@ -133,7 +169,9 @@ When the plan matches and nothing is reported:
    live: from then on what you push shows up in their open page within seconds, and
    what they change there comes back to you.
 3. Give them the link and say what they can do: Dollhouse, Plan and Walk views, tap
-   a door, a drawer or a lamp, the tape measure, the time of day, furnishing. And how
+   a door, a drawer or a lamp, the tape measure, the time of day, furnishing (on a
+   phone, the *Move* button lets a drag move a piece; off, drags only turn the view),
+   matching a finish to a photo. And how
    sharing works: the Share menu at the top of the Artifact. People they share it with
    as Editors can furnish it; Contributors can make their own version and suggest it
    back; Viewers, and anyone with a public link, can look around. Everyone with the

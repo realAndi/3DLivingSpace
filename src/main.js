@@ -30,7 +30,8 @@ import { fmtLen, fmtDims, fmtArea } from './units.js';
 // through src/claude-store.js, and the people looking at it at the same time
 // see each other (src/together.js): both loaded only then, and starting now.
 // Matching a texture to a photo with the viewer's own Claude (src/match.js) is the Artifact's too.
-const inClaude = window.LIVING_SPACE === 'artifact' ? Promise.all([import('./claude-store.js'), import('./together.js'), import('./match.js')]) : null;
+// It's an extra: if it can't load, the page goes on without it.
+const inClaude = window.LIVING_SPACE === 'artifact' ? Promise.all([import('./claude-store.js'), import('./together.js'), import('./match.js').catch(() => null)]) : null;
 
 const DEG = Math.PI / 180;
 const EYE = 5.2;
@@ -757,7 +758,7 @@ const suggest = createSuggestions({
   },
 });
 
-const BUILD_PROMPT = 'Build my apartment in 3D Living Space from the floor plan and photos I\'m sharing. Work to scale: get the scale from the room sizes printed on the plan, trace each room as the clear floor inside its walls, then add every door (with the way it swings), the windows, the kitchen cabinets and appliances, the bathroom fixtures, closets and laundry, and the finishes you can see in the photos. Fix every problem the tools report, then tell me what you couldn\'t see and what you assumed.';
+const BUILD_PROMPT = 'Build my apartment in 3D Living Space from the floor plan and photos I\'m sharing. Work to scale: get the scale from the room sizes printed on the plan, trace each room as the clear floor inside its walls, then add every door (with the way it swings), the windows, the kitchen cabinets and appliances, the bathroom fixtures, closets and laundry, and the finishes you can see in the photos, with textures made to match the floors, counters and tile where the built-in ones don't. Fix every problem the tools report, then tell me what you couldn\'t see and what you assumed.';
 const FURNISH_PROMPT = 'Furnish my unit in 3D Living Space. First ask me how I live and what style I like. Then place furniture that fits: keep 36" walkways, don\'t block any door swings, and check every room\'s clearances before you finish.';
 $('#buildPromptText').textContent = BUILD_PROMPT;
 $('#furnishPromptText').textContent = FURNISH_PROMPT;
