@@ -14,7 +14,7 @@ import { carry } from './stacking.js';
 // missing from theirs may just be one the owner added since).
 
 const NUM = ['w', 'd', 'h', 'x', 'z'];
-const TEXT = ['type', 'asset', 'name', 'color', 'on'];
+const TEXT = ['type', 'asset', 'name', 'color', 'material', 'on'];
 const EPS = 1e-4;
 
 const angle = (a) => ((((a ?? 0) % 360) + 360) % 360);
@@ -39,7 +39,7 @@ export function whatChanged(from, to) {
   const turned = turnOf(from.rot, to.rot);
   if (Math.abs(turned) >= 0.5) out.turned = turned;
   if (['w', 'd', 'h'].some((k) => Math.abs((from[k] ?? 0) - (to[k] ?? 0)) > EPS)) out.resized = true;
-  if ((from.color ?? null) !== (to.color ?? null)) out.recolored = true;
+  if ((from.color ?? null) !== (to.color ?? null) || (from.material ?? null) !== (to.material ?? null)) out.recolored = true;
   if ((from.name ?? '') !== (to.name ?? '')) out.renamed = true;
   if (from.type !== to.type || (from.asset ?? null) !== (to.asset ?? null)) out.retyped = true;
   if ((from.on ?? null) !== (to.on ?? null)) out.onto = to.on ?? 'floor';

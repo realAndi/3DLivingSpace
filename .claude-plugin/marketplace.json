@@ -1,0 +1,19 @@
+{
+  "name": "3dlivingspace",
+  "description": "Build, furnish and share a to-scale 3D model of your apartment with Claude.",
+  "owner": {
+    "name": "realAndi",
+    "url": "https://github.com/realAndi"
+  },
+  "plugins": [
+    {
+      "name": "3d-living-space",
+      "description": "Build a to-scale 3D model of your apartment from its floor plan and photos, furnish it, and share it as a live page on claude.ai that you walk through on your phone or computer.",
+      "source": {
+        "source": "archive",
+        "url": "https://github.com/realAndi/3DLivingSpace/releases/download/skill-v1.0.2/3d-living-space-plugin.zip",
+        "sha256": "d986c663dede5b68906312e5114152d3303ceb7288f1303ac9df1e07405bb25f"
+      }
+    }
+  ]
+}

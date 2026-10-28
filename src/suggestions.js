@@ -297,7 +297,7 @@ export function createSuggestions(opts) {
     for (const [key, e] of shown) if (want.get(key)?.sig !== e.sig) { drop(e.g); shown.delete(key); }
     for (const [key, w] of want) {
       if (shown.has(key)) continue;
-      const g = buildPiece(M, w.item, w.assets);
+      const g = buildPiece(M, w.item, w.assets, layout.U?.textures);
       if (w.ghost) ghostly(g);
       root.add(g);
       shown.set(key, { sig: w.sig, g });

@@ -99,6 +99,19 @@ export const SWATCHES = [
 ];
 export const swatchKeys = SWATCHES.map((s) => s.key).filter(Boolean);
 
+// What a piece is made of, besides its color: its main material (a sofa's
+// upholstery, a table's top), or one of the unit's own textures ("tex:<id>").
+// Tinted ones take the piece's color; the rest show their own.
+export const MATERIALS = [
+  { key: 'fabric', name: 'Woven', tint: true }, { key: 'linen', name: 'Linen', tint: true },
+  { key: 'velvet', name: 'Velvet', tint: true }, { key: 'boucle', name: 'Bouclé', tint: true },
+  { key: 'leather', name: 'Leather', tint: true }, { key: 'jute', name: 'Jute', tint: true },
+  { key: 'oak', name: 'Oak' }, { key: 'ash', name: 'Ash' }, { key: 'walnut', name: 'Walnut' }, { key: 'rattan', name: 'Rattan' },
+  { key: 'marble', name: 'Marble' }, { key: 'travertine', name: 'Travertine' }, { key: 'terrazzo', name: 'Terrazzo' },
+  { key: 'concrete', name: 'Concrete' }, { key: 'brass', name: 'Brass' }, { key: 'steel', name: 'Steel' },
+];
+export const materialKeys = MATERIALS.map((m) => m.key);
+
 // Where a placed piece goes, and what it is, from its catalog entry or custom
 // asset (`assets` by id or as a list).
 const assetFor = (item, assets) => (item.type !== 'asset' || !assets ? null

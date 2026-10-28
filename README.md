@@ -7,6 +7,11 @@ doors, windows, kitchen and baths while you watch. Then furnish it yourself or
 ask Claude to, walk through it, measure anything, and send the link to anyone,
 who can look around and make their own version.
 
+Or with no server at all: the Claude skill in `skill/3d-living-space/` builds
+the unit in a conversation and publishes it as a claude.ai Artifact, the same
+app with its data in the Artifact's own database (see [As a Claude
+skill](#as-a-claude-skill)).
+
 **Live:** https://reallyitsandi.com/3DLivingSpace/
 
 ## Using it
@@ -32,7 +37,11 @@ who can look around and make their own version.
   phone, near the middle of the view (tap the prompt too). Open all / Close all
   (Tools) still work the doors.
 - **Furnish.** Add pieces from a catalog of typical sizes, drag, turn, resize and
-  recolor them. With *Pieces can't overlap* on (the default), a piece slides
+  recolor them, and choose what each is made of: velvet, bouclé, linen, leather,
+  jute, oak, ash, walnut, rattan, marble, travertine, terrazzo, brass, or a texture
+  made for the unit (colors tint the weaves and leather). On a phone or tablet, the
+  **Move** button by the view decides whether a drag on a piece moves it: off (the
+  default), drags only turn the view and a tap selects; adding a piece turns it on. With *Pieces can't overlap* on (the default), a piece slides
   along and stops flush against walls, their trim (baseboards, door casings,
   window stools, at their real heights, so a coffee table slides under a sill
   that stops a sofa), built-ins and other pieces. Pieces collide by their real
@@ -60,6 +69,15 @@ who can look around and make their own version.
   surfaces (heights too) in Dollhouse and Walk.
 - **Units:** Feet & inches, Inches, or Centimeters (Tools tab), per browser.
 - **Textures:** Auto picks a lighter set on phones; Tools can set Low or High, per browser.
+- **Finishes that match the real place.** Besides the built-in floors, counters,
+  backsplashes and tile, Claude can design a texture to match a photo of the real
+  surface: `create_texture` takes a recipe (`src/recipes.js`): a pattern of pieces at
+  real sizes (planks, tiles, herringbone, chevron, basketweave, hexagons, checker,
+  stripes, plaid) with grain, veins, chips, pits, weave and mottling drawn into each,
+  and hands back a picture of it beside the photo, with measured colors and contrast
+  and what to change, until they match. The unit keeps it as `tex:<id>` for floors,
+  finishes, cabinets and pieces. As an Artifact, editors also get *Match a photo*:
+  their own Claude designs it from a photo they pick, scoring each try in the page.
 - **Share.** The unit's link (`/u/<id>`) is view-only for everyone else, with a
   *Make your own version* button that copies it. Your browser keeps the edit key
   of the units it made; the edit link (`/u/<id>#edit=<key>`) works on any device.
@@ -92,9 +110,91 @@ piece faces south.
 | `set_info` | Title and author |
 | `place_items` / `update_items` / `remove_items` | Furniture: on the floor, on a piece or counter (`on`), on a wall at a height (`elevation`), or from the ceiling; what rests on a piece moves and goes with it |
 | `create_asset` | A custom 3D piece from boxes, cylinders, cones and spheres, with where it goes, what it is, and a bulb for lamps |
+| `create_texture` | A texture designed to match a photo of a real floor, counter, tile or fabric, as a recipe; returns its preview to compare with the photo, and uses it where `apply_to` says |
 | `find_spots` | Where a footprint fits, optionally against a wall |
 | `check_unit` | The unit's problems, and each piece's clear floor and problems |
 | `render_plan` | A labeled top-down picture with inch coordinates, to compare with the floor plan |
+
+On the command line, `create_texture --sample <photo> --crop x,y,w,h` measures the
+texture against that part of the photo and draws them side by side.
+
+## As a Claude skill
+
+The skill gives Claude the same thirteen tools as scripts it runs itself, and
+publishes the result as an Artifact: the whole 3D app, served by claude.ai, with
+nothing on this server and no MCP connector. The person shares their floor plan
+and photos in a conversation; Claude builds the unit, checks it against the plan,
+publishes it and gives them the link; they walk through it, furnish it and share
+it from claude.ai's Share menu.
+
+**Install.** Each [release](https://github.com/realAndi/3DLivingSpace/releases/latest)
+carries the skill as a plugin, which every Claude app installs, and on its own:
+
+- **claude.ai, the Claude desktop app and Cowork:** download
+  `3d-living-space-plugin.zip` and add it under Customize, Plugins, Add, Upload
+  plugin (code execution on). It then reaches Claude Code on the same account too.
+  Chat there has no Artifact tool to publish with, so Claude builds, checks and
+  draws the unit the same way and hands over the page as one HTML file
+  (`bundle --single`) to download and open. The live, shareable page needs Claude
+  Code (or the desktop app's Code tab).
+- **Claude Code:** `/plugin install 3d-living-space --marketplace realAndi/3DLivingSpace`
+  (until this branch is merged, `realAndi/3DLivingSpace#artifact-skill`), which
+  adds this repository's marketplace and installs the plugin from it; or unzip
+  either zip into `~/.claude/skills/`. Then attach a floor plan and ask Claude to
+  build it in 3D.
+- **The skill alone:** `3d-living-space.zip`, for Customize, Skills on claude.ai.
+
+Nothing needs installing where it runs but Node 18 or later: the zips carry the
+scripts, the `src/` modules they use, zod and resvg's WebAssembly build
+vendored, the fonts, and the app's files prebuilt.
+
+**Releasing it.** Raise `version` in `skill/plugin.json`, then:
+
+```sh
+npm run skill -- --marketplace     # dist/: both zips and marketplace.json; .claude-plugin/marketplace.json pins the new zip
+git commit -am "Skill <version>" && git tag -a skill-v<version> -m "Skill <version>" && git push --follow-tags
+gh release create skill-v<version> dist/3d-living-space-plugin.zip dist/3d-living-space.zip dist/marketplace.json
+```
+
+The marketplace's one entry is the plugin zip of that release, pinned by its
+sha256, so upload exactly the files that build wrote. Claude Code reads the
+catalog from the repository (`realAndi/3DLivingSpace`, or a branch or tag after
+`#`), never from a github.com download link: it takes any github.com URL for a
+git repository to clone.
+
+**The scripts.** `node scripts/space.mjs <command>`, over a work folder that holds
+the unit between calls:
+
+| Command | |
+| --- | --- |
+| `get_unit` … `render_plan` | The MCP tools by the same names, taking the same JSON (checked by the same zod schemas, `src/tools.js`) and answering the same way (`src/agent.js`). `render_plan` writes a PNG; `--overlay <floor plan> --overlay-scale <px per inch> --overlay-origin <x,y>` lays the plan over it |
+| `new [--example]`, `help [tool]`, `doctor` | A fresh unit or the example's rooms; a tool's input as JSON Schema; Node and the renderer |
+| `bundle` | The Artifact's files and the publish call to make; `--snapshot-only` refreshes the snapshot; `--single` writes the one-file page |
+| `pull`, `push` | Keep the work folder and the Artifact's database in step: the ArtifactData reads and versioned batch writes to make |
+
+**The Artifact.** Its page is `index.html` and `src/` as they are, with the
+page's outer shell trimmed and three.js named by URL instead of through the
+import map, which browsers ignore once claude.ai's own scripts have loaded a
+module (`skill/3d-living-space/scripts/app.mjs`). Its first
+line tells `src/main.js` to load `src/claude-store.js` in place of
+`src/sync.js`. It paints at once from `unit.json`, a snapshot published beside
+it (all that visitors who aren't signed in see), then lives in the Artifact's
+`db`:
+
+| Document | |
+| --- | --- |
+| `unit/spec`, `unit/layout`, `unit/info`, `assets/<id>` | The unit, the furniture, the name, custom pieces. Everyone reads them; editors and Claude write them, live in every open page |
+| `data/users/<id>/version` | Someone's own version, private to them |
+| `suggestions/<id>` | Their version sent back: only editors read it, and apply it with `src/changes.js` |
+
+Who can do what follows claude.ai's sharing: Editors furnish it; Contributors
+make their own version and suggest it; Viewers and anyone with a public link look
+around. Everyone with it open sees the others walking through as figures
+(`src/together.js`, the `room` capability), and a selected piece's *Ask Claude*
+hands it to the viewer's own conversation with Claude beside the page.
+`test/harness/` stands in for claude.ai locally: the page in the platform's own
+skeleton, with a `window.claude` whose `db`, `user` and `room` follow the
+capability contracts, and a small Chrome driver.
 
 ## How a unit is described
 
@@ -115,9 +215,12 @@ same thing from it:
   laundry, closets, fireplaces and more.
 - **Finishes:** wall paint, floors per room, cabinets, counters, backsplash,
   appliances, hardware, tile.
+- **Textures:** recipes made for the unit (`textures`), named as `tex:<id>` by a
+  finish, a room's floor, a fixture's color or a piece's material. Inches, like the
+  rest; whatever names one the unit lacks goes back to its default.
 - **North:** which way true north points on the plan, for the sun.
 
-Placed pieces are `{uid, type, w, d, h, x, z, rot, color, asset?}` in feet, plus,
+Placed pieces are `{uid, type, w, d, h, x, z, rot, color, material?, asset?}` in feet, plus,
 off the floor, `y` (the height of the underside) and `on` (`wall`, `ceiling`,
 `p:<uid>` for a piece, `f:<id>` for a fixture). `src/stacking.js` puts them
 there and moves what rests on a piece with it; collisions and checks
@@ -151,7 +254,9 @@ Node 24 or later.
 ```sh
 npm install
 npm start          # http://localhost:8790/
-npm test           # starts the server on a scratch database and drives the API and MCP tools
+npm test           # starts the server on a scratch database and drives the API and MCP tools, and the skill's scripts
+npm run skill      # the skill, packaged: dist/3d-living-space/ and its zip
+node test/harness/server.mjs   # the page as an Artifact: http://127.0.0.1:8791/?as=owner (see test/harness/README.md)
 ```
 
 `BASE_PATH` serves it under a path (production uses `/3DLivingSpace`),
@@ -188,11 +293,17 @@ fixes the origin used in links.
 | `src/furniture.js`, `src/layout.js` | 3D furniture and custom pieces; placing, dragging, clearances |
 | `src/interact.js` | Things you can use: doors, fixtures' doors and drawers, lamps, screens, curtains, fans, light switches; the prompts |
 | `src/sync.js` | Opening, creating, copying and saving units; live updates |
+| `src/claude-store.js`, `src/together.js` | As an Artifact: the unit in the Artifact's database, your own version, suggestions; who else is walking through, and handing a piece to Claude |
+| `src/tools.js`, `src/agent.js`, `src/drawing.js` | The agent's tools, shared by the MCP server and the skill: what they take (zod), what they do, and the plan they draw |
 | `src/measure.js`, `src/walk.js`, `src/units.js` | Tape measure, first-person controls, display units |
-| `src/materials.js`, `src/textures.js`, `assets/tex/` | Materials with color, normal and roughness maps: finishes drawn in code, and CC0 scans of fabric, leather, carpet, walnut, marble and concrete (sources in `assets/tex/SOURCES.md`), loaded when first used at a quality that suits the device |
+| `src/materials.js`, `src/textures.js`, `assets/tex/` | Materials with color, normal and roughness maps: finishes drawn in code or from recipes, and CC0 scans of fabrics (velvet, bouclé, linen, jute), leather, carpet, woods (walnut, ash, herringbone oak, rattan), stone (marble, travertine, slate, granite, terrazzo), tile (hex, zellige) and concrete (sources in `assets/tex/SOURCES.md`), loaded when first used at a quality that suits the device |
+| `src/recipes.js`, `src/png.js` | Textures as recipes: cleaning them, drawing them the same in the browser, the server and the skill, built-in ones, and measuring a picture against a photo; PNGs for the agent's previews |
+| `src/match.js` | As an Artifact: *Match a photo*, the viewer's Claude designing a texture from their photo |
 | `src/surroundings.js` | The view out the windows, by day and by night |
 | `src/lighting.js`, `src/lightpanel.js` | The sun, sky and exposure by time of day; room lights, switches and lamps on a fixed pool of real lights; the lights panel |
 | `server/` | HTTP server, units API, per-unit MCP servers, plan pictures (`render.js`, IBM Plex fonts under the OFL) |
+| `skill/` | The Claude skill (`3d-living-space/`: SKILL.md and its scripts) and its packager (`package.mjs`) |
+| `test/harness/` | The Artifact's viewer, locally, for testing the page as an Artifact |
 
 ## Deploying
 

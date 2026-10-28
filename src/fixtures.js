@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { Batch, Frame } from './kit.js';
-import { paint } from './materials.js';
+import { paint, textureMaterial } from './materials.js';
+import { isTexRef } from './recipes.js';
 
 // Built-in fixtures (kitchens, baths, laundry, storage and the rest) from a
 // built unit's U.fixtures; see FIXTURES and SEGMENTS in src/unit.js.
@@ -43,23 +44,30 @@ const std = (color, roughness, extra = {}) => new THREE.MeshStandardMaterial({ c
 const tint = (M, key, base, color, extra = {}) => cached(M, key, () => Object.assign(base.clone(), extra, { color: new THREE.Color(color) }));
 
 const CABINET_PAINT = { white: 0xf2f0eb, gray: 0x8b8e90, navy: 0x27354a, sage: 0x97a389, black: 0x252525 };
-function cabinetMat(M, key) {
+// `textures` are the unit's own (src/recipes.js), named as "tex:<id>".
+function cabinetMat(M, key, textures) {
+  if (isTexRef(key)) return textureMaterial(M, textures, key) ?? M.oak;
   if (key === 'oak' || !key) return M.oak;
   if (key === 'walnut') return M.walnut;
+  if (key === 'ash') return M.ash;
   const hex = CABINET_PAINT[key] ?? (/^#[0-9a-f]{6}$/i.test(key) ? parseInt(key.slice(1), 16) : null);
   if (hex === null) return M.oak;
   return cached(M, `cab:${hex}`, () => std(hex, 0.5));
 }
 
-function counterMat(M, key) {
-  if (key === 'marble') return M.marble;
+const STONES = new Set(['marble', 'granite', 'soapstone', 'terrazzo', 'travertine']);
+function counterMat(M, key, textures) {
+  if (isTexRef(key)) return textureMaterial(M, textures, key) ?? M.quartz;
+  if (STONES.has(key)) return M[key];
   if (key === 'black') return tint(M, 'counter:black', M.quartz, 0x2c2c2d, { roughness: 0.2 });
   if (key === 'wood') return tint(M, 'counter:wood', M.oak, 0xd8c8b8, { roughness: 0.5 });
   if (key === 'concrete') return tint(M, 'counter:concrete', M.quartz, 0x9e9b96, { roughness: 0.75 });
   return M.quartz;
 }
 
-function tileMat(M, key) {
+function tileMat(M, key, textures) {
+  if (isTexRef(key)) return textureMaterial(M, textures, key) ?? M.tileWall;
+  if (key === 'marble' || key === 'zellige' || key === 'terrazzo') return M[key];
   // White brightens the warm gray porcelain past 1 (linear), so its grout fades too.
   if (key === 'white') return tint(M, 'tile:white', M.tileWall, new THREE.Color().setRGB(1.6, 1.58, 1.55));
   if (key === 'charcoal') return tint(M, 'tile:charcoal', M.tileWall, 0x4b4b4b);
@@ -81,6 +89,18 @@ function hardwareMat(M, key) {
   if (key === 'steel') return M.steel;
   if (key === 'brass') return cached(M, 'hardware:brass', () => std(0xc39c5c, 0.32, { metalness: 1 }));
   return M.black;
+}
+
+// The backsplash's material and how far it stands off the wall.
+function backsplashOf(X, key) {
+  const { M } = X;
+  if (isTexRef(key)) return [textureMaterial(M, X.textures, key) ?? M.subway, 0.03];
+  if (key === 'stone') return [X.counter, 0.05];
+  if (key === 'marble') return [M.marble, 0.05];
+  if (key === 'zellige') return [M.zellige, 0.04];
+  if (key === 'hex') return [M.floorHex, 0.03];
+  if (key === 'herringbone') return [M.herringboneTile, 0.03];
+  return [M.subway, 0.03];
 }
 
 // ---------------------------------------------------------------------------
@@ -758,13 +778,13 @@ function run(X, F, r) {
   // Backsplash behind the counters and the range, up to the uppers.
   if (r.againstBack && r.backsplash && r.backsplash !== 'none') {
     const top = r.uppers ? r.upperBottom : ct + 1.5;
-    const [mat, th] = r.backsplash === 'stone' ? [X.counter, 0.05] : [M.subway, 0.03];
+    const [mat, th] = backsplashOf(X, r.backsplash);
     for (const [i, j] of spans((k) => hasCounter(k) || kind(k) === 'range')) F.box(B, mat, segs[i].s0, ct, 0, segs[j].s1, top, th);
   }
 
   // Outlets on the backsplash, clear of sinks, cooktops and corners.
   if (r.againstBack && r.counter !== false) {
-    const t = r.backsplash === 'stone' ? 0.05 : r.backsplash === 'none' ? 0 : 0.03;
+    const t = !r.backsplash || r.backsplash === 'none' ? 0 : backsplashOf(X, r.backsplash)[1];
     for (const [i, j] of spans((k) => hasCounter(k) && !['sink', 'cooktop', 'corner'].includes(kind(k)))) {
       const a = segs[i].s0, b = segs[j].s1, len = b - a;
       if (len < 0.6) continue;
@@ -1255,11 +1275,11 @@ export function buildFixtures(M, U) {
   const B = new Batch('fixtures');
   const glass = new Batch('fixture-glass');
   const soffit = new Batch('fixture-soffit');
-  const fin = U.finishes ?? {};
+  const fin = U.finishes ?? {}, textures = U.textures ?? [];
   const shared = {
-    M, B, glass, soffit,
-    counter: counterMat(M, fin.counters), app: applianceMats(M, fin.appliances), hw: hardwareMat(M, fin.hardware),
-    tile: tileMat(M, fin.tile), paint: paint(fin.walls ?? '#f2f1ee'), movers: [],
+    M, B, glass, soffit, textures,
+    counter: counterMat(M, fin.counters, textures), app: applianceMats(M, fin.appliances), hw: hardwareMat(M, fin.hardware),
+    tile: tileMat(M, fin.tile, textures), paint: paint(fin.walls ?? '#f2f1ee'), movers: [],
   };
   shared.laundry = fin.appliances === 'black' ? shared.app.body : M.appliance;
   const batches = [B, glass, soffit];
@@ -1267,7 +1287,7 @@ export function buildFixtures(M, U) {
     const build = BUILD[f.type];
     if (!build) continue;
     const room = U.roomById?.[f.room];
-    const X = { ...shared, cab: cabinetMat(M, f.color ?? fin.cabinets), ceiling: room?.ceiling ?? U.heights?.ceiling ?? 9, fixtureId: f.id };
+    const X = { ...shared, cab: cabinetMat(M, f.color ?? fin.cabinets, textures), ceiling: room?.ceiling ?? U.heights?.ceiling ?? 9, fixtureId: f.id };
     const m = new THREE.Matrix4().makeRotationY(-f.rot * DEG).setPosition(f.x, 0, f.z);
     batches.forEach((b) => b.push(m));
     // One odd fixture shouldn't take the rest of the unit down with it.

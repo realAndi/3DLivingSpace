@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { Batch } from './kit.js';
 import { paint, floorMaterial } from './materials.js';
+import { hardFloor } from './unit.js';
 
 // The shell of a built unit (src/unit.js buildUnit): walls, floors, ceilings,
 // trim, windows, doors and balcony railings, all placed from U alone.
@@ -18,7 +19,6 @@ const BASE_T = 0.045;
 const RAIL_H = 3.5;       // 42" guard rail
 const STEP = 1 / 48;      // sampling step along walls
 const CLOSETS = new Set(['closet', 'storage', 'pantry']);
-const HARD_FLOORS = new Set(['tile', 'stone']);  // no baseboards on these
 const UP = new THREE.Vector3(0, 1, 0);
 
 const v3 = (d) => new THREE.Vector3(d[0], 0, d[1]);
@@ -76,7 +76,7 @@ export function buildArchitecture(M, U) {
     M, U, ...B,
     H: U.heights, res: U.grid.res,
     wallMat: paint(U.finishes.walls),
-    floorOf: (room) => floorMaterial(M, room.floor, { tile: U.finishes.tile }),
+    floorOf: (room) => floorMaterial(M, room.floor, { tile: U.finishes.tile, textures: U.textures }),
     // Jamb liners stand this far proud of the nominal opening, enough to hide
     // the wall grid's steps.
     JL: Math.max(0.045, 0.75 * U.grid.res + 0.015),
@@ -206,7 +206,7 @@ function buildEdge(ctx, e) {
       if (onFloor) floors.box(ctx.floorOf(r), s0, -0.02, -0.01, s1, -0.003, f + 0.01);
       if (!r.outdoor && top >= r.ceiling - 0.01) ceil.box(M.ceiling, s0, r.ceiling + 0.003, -0.01, s1, r.ceiling + 0.02, f + 0.01);
     }
-    if (onFloor && !r.outdoor && !HARD_FLOORS.has(r.floor)) {
+    if (onFloor && !r.outdoor && !hardFloor(r.floor, U.textures)) {
       trim.box(M.trim, s0, 0, f - BASE_T, s1, Math.min(BASE_H, solid[0][1]), f + res);
     }
   }

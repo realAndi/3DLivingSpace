@@ -1,0 +1,21 @@
+{
+  "name": "3d-living-space",
+  "displayName": "3D Living Space",
+  "version": "1.1.0",
+  "description": "Build a to-scale 3D model of your apartment from its floor plan and photos, furnish it, and share it as a live page on claude.ai that you walk through on your phone or computer.",
+  "author": {
+    "name": "realAndi",
+    "url": "https://github.com/realAndi"
+  },
+  "homepage": "https://github.com/realAndi/3DLivingSpace#as-a-claude-skill",
+  "repository": "https://github.com/realAndi/3DLivingSpace",
+  "license": "MIT",
+  "keywords": [
+    "floor plan",
+    "3d",
+    "apartment",
+    "furniture",
+    "interior design",
+    "artifact"
+  ]
+}

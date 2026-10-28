@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { rng } from './kit.js';
-import { canvas, fit, initTextures, load, textureQuality, textureSet } from './textures.js';
+import { canvas, fit, fromGray, fromPixels, initTextures, load, textureQuality, textureSet, textureUrl } from './textures.js';
+import { isTexRef, patch, preset, repeatOf, startRender, texId } from './recipes.js';
 
 // Finish palette sampled from the photos: greige LVP plank floor, white walls,
 // light rift-oak cabinets with matte-black bar pulls, white quartz, white
@@ -292,17 +293,94 @@ export function paint(hex) {
   return paints.get(key);
 }
 
-// The material for a unit floor kind (src/unit.js FLOORS). `tile` is the
-// unit's tile finish, for tile floors.
-const FLOOR_KEYS = { wood: 'floor', 'wood-dark': 'floorDark', stone: 'stoneFloor', carpet: 'carpet', concrete: 'concrete', deck: 'deck' };
-export function floorMaterial(M, kind, { tile = 'warm-gray' } = {}) {
-  if (kind === 'tile') return tileMaterial(M, tile, 'floor');
+// ---------------------------------------------------------------------------
+// Textures made for the unit (src/recipes.js): drawn a few rows at a time
+// while the page is idle, one material per recipe and material set.
+
+const breathe = () => new Promise((r) => (globalThis.requestIdleCallback ? requestIdleCallback(r, { timeout: 120 }) : setTimeout(r, 0)));
+async function drawRecipe(t, q) {
+  const job = startRender(t, q === 'low' ? { maxPx: 512, ppi: 20 } : { maxPx: 1024, ppi: 40 });
+  while (!job.step(16)) await breathe();
+  const { w, h, color, height, rough } = job.out;
+  return { color: fromPixels(w, h, color), height: fromGray(w, h, height), rough: fromGray(w, h, rough) };
+}
+
+// Heights 0–1 stand relief × 0.3" (as src/recipes.js previews them); the
+// roughness map holds the roughness itself.
+function makeRecipeMaterial(t) {
+  const set = textureSet({
+    feet: repeatOf(t).map((v) => v / 12), placeholder: t.base, relief: t.finish.relief * 0.025,
+    rough: true, roughAt: t.finish.roughness, make: (q) => drawRecipe(t, q),
+  });
+  const opts = { ...set, roughness: 1, metalness: t.finish.metal ?? 0 };
+  const m = t.finish.sheen
+    ? new THREE.MeshPhysicalMaterial({ ...opts, sheen: t.finish.sheen, sheenRoughness: 0.45, sheenColor: new THREE.Color(t.base).lerp(new THREE.Color(0xffffff), 0.4) })
+    : new THREE.MeshStandardMaterial(opts);
+  m.userData.recipe = t.id;
+  return m;
+}
+const recipes = new WeakMap();
+export function recipeMaterial(M, t) {
+  let cache = recipes.get(M);
+  if (!cache) recipes.set(M, (cache = new Map()));
+  const key = JSON.stringify(t);
+  if (!cache.has(key)) cache.set(key, makeRecipeMaterial(t));
+  return cache.get(key);
+}
+
+// A small picture of a recipe, as a data URL, for buttons that pick it.
+const thumbs = new Map();
+export function recipeThumb(t, px = 56) {
+  const key = `${px}|${JSON.stringify(t)}`;
+  if (!thumbs.has(key)) {
+    const p = patch(t, { px, inches: Math.min(24, repeatOf(t)[0]) });
+    thumbs.set(key, fromPixels(p.w, p.h, p.rgba).toDataURL());
+  }
+  return thumbs.get(key);
+}
+
+// How each built-in piece material looks on its button: its picture (in the
+// material's color, for tinted weaves) or a color.
+const LOOKS = {
+  fabric: ['fabric-tone', '#8e8984'], linen: ['linen-tone', '#ece8e0'], velvet: ['velvet-tone', '#4b5d4f'], boucle: ['boucle-tone', '#e9e4da'],
+  leather: ['leather-height', '#6a4430'], jute: ['jute-tone', '#c2a77c'], ash: ['ash-color'], walnut: ['walnut-color'], rattan: ['rattan-color'],
+  marble: ['marble-color'], travertine: ['travertine-color'], terrazzo: ['terrazzo-color'], concrete: ['concrete-color'],
+  oak: [null, 'linear-gradient(100deg, #cfa774, #c19762 40%, #d4ae7d 60%, #c39a66)'], brass: [null, 'linear-gradient(135deg, #e4c78d, #b58c4c 55%, #d9b97a)'],
+  steel: [null, 'linear-gradient(135deg, #e3e5e7, #a9adb1 55%, #d6d9dc)'],
+};
+export function materialLook(key) {
+  const [file, color] = LOOKS[key] ?? [null, '#ccc'];
+  if (!file) return `background:${color}`;
+  const url = textureUrl(file, 'low');
+  return color ? `background:${color} url("${url}") center/cover;background-blend-mode:multiply` : `background:url("${url}") center/cover`;
+}
+
+// The material a "tex:<id>" names among `textures` (the unit's), or null.
+export function textureMaterial(M, textures, ref) {
+  const t = isTexRef(ref) ? textures?.find((x) => x.id === texId(ref)) : null;
+  return t ? recipeMaterial(M, t) : null;
+}
+
+// The material for a unit floor kind (src/unit.js FLOORS), or one of the
+// unit's textures. `tile` is the unit's tile finish, for tile floors.
+const FLOOR_KEYS = {
+  wood: 'floor', 'wood-dark': 'floorDark', herringbone: 'floorHerringbone', chevron: 'floorChevron', stone: 'stoneFloor',
+  'hex-tile': 'floorHex', checker: 'floorChecker', slate: 'slate', travertine: 'travertine', marble: 'marble', terrazzo: 'terrazzo',
+  carpet: 'carpet', concrete: 'concrete', deck: 'deck',
+};
+export function floorMaterial(M, kind, { tile = 'warm-gray', textures = [] } = {}) {
+  if (isTexRef(kind)) return textureMaterial(M, textures, kind) ?? M.floor;
+  if (kind === 'tile') return tileMaterial(M, tile, 'floor', textures);
   return M[FLOOR_KEYS[kind] ?? 'floor'];
 }
 
-// Porcelain tile in one of the unit's tile finishes, for floors or walls.
-const TILE_KEYS = { 'warm-gray': ['tileFloor', 'tileWall'], white: ['tileFloorWhite', 'tileWallWhite'], charcoal: ['tileFloorCharcoal', 'tileWallCharcoal'] };
-export function tileMaterial(M, finish = 'warm-gray', where = 'floor') {
+// Tile in one of the unit's tile finishes, for floors or walls.
+const TILE_KEYS = {
+  'warm-gray': ['tileFloor', 'tileWall'], white: ['tileFloorWhite', 'tileWallWhite'], charcoal: ['tileFloorCharcoal', 'tileWallCharcoal'],
+  marble: ['marble', 'marble'], zellige: ['zellige', 'zellige'], terrazzo: ['terrazzo', 'terrazzo'],
+};
+export function tileMaterial(M, finish = 'warm-gray', where = 'floor', textures = []) {
+  if (isTexRef(finish)) return textureMaterial(M, textures, finish) ?? M[where === 'wall' ? 'tileWall' : 'tileFloor'];
   const keys = TILE_KEYS[finish] ?? TILE_KEYS['warm-gray'];
   return M[keys[where === 'wall' ? 1 : 0]];
 }
@@ -326,6 +404,14 @@ function once(make) {
   return () => (value ??= make());
 }
 
+// The surface one tile of each newer scan covers, in feet, [u, v] where the
+// scan wasn't square (assets/tex/SOURCES.md). Jute is a burlap, scaled up to a
+// jute rug's coarser weave.
+const SCAN_FEET = {
+  velvet: [0.932, 0.897], boucle: [1.033, 1.28], rattan: 0.85, jute: 2.2, travertine: 3.94, slate: 3.3, granite: 1.64, terrazzo: 1.97,
+  ash: 3.28, herringbone: 11.15, hex: 1.48, zellige: 5.25,
+};
+
 // Gray tone maps (fabric, leather, carpet) average about this much in linear
 // light, so their materials' colors are divided by it: a gray sofa stays the
 // same gray, now with a weave.
@@ -341,6 +427,8 @@ export function tinted(base, hex) {
   if (!cache.has(hex)) {
     const m = base.clone();
     m.color = base.userData.toned ? toned(hex) : new THREE.Color(hex);
+    // Velvet's sheen follows its color, a little lighter.
+    if (m.sheen) m.sheenColor = new THREE.Color(hex).lerp(new THREE.Color(0xffffff), 0.45);
     cache.set(hex, m);
   }
   return cache.get(hex);
@@ -451,6 +539,30 @@ export function createMaterials(renderer, { onChange } = {}) {
   lazy(M, 'headboard', () => cloth(upholstery(), 0xb8ab98, { roughness: 0.95 }));
   lazy(M, 'linen', () => cloth(bedding(), 0xf3f1ec, { roughness: 0.95 }));
   lazy(M, 'duvet', () => cloth(bedding(), 0xe9e5dd, { roughness: 0.95 }));
+  // Newer scans: floors, counters and tile, and woods and weaves for furniture.
+  const scan = (name, extra) => { const f = SCAN_FEET[name]; return textureSet({ feet: Array.isArray(f) ? f : [f, f], ...extra }); };
+  lazy(M, 'floorHerringbone', () => pbr(scan('herringbone', { placeholder: '#a98058', relief: 0.008, detail: 0.5, rough: through(0.25, 1, 0.6, 0.62), roughAt: 0.65, make: files({ color: 'herringbone-color', height: 'herringbone-height' }) }), { roughness: 0.78 }));
+  lazy(M, 'floorHex', () => pbr(scan('hex', { placeholder: '#e9e7e2', relief: 0.004, detail: 0.5, rough: through(0.25, 1, 0.6, 0.35), roughAt: 0.4, make: files({ color: 'hex-color', height: 'hex-height' }) }), { roughness: 0.9 }));
+  lazy(M, 'slate', () => pbr(scan('slate', { placeholder: '#4d5250', relief: 0.01, detail: 0.5, rough: through(0.3, 1, 0.7, 0.75), roughAt: 0.85, make: files({ color: 'slate-color', height: 'slate-height' }) }), { roughness: 0.85 }));
+  lazy(M, 'travertine', () => pbr(scan('travertine', { placeholder: '#d6c4a6', relief: 0.006, detail: 0.5, rough: through(0.25, 1, 0.6, 0.55), roughAt: 0.6, make: files({ color: 'travertine-color', height: 'travertine-height' }) }), { roughness: 0.7 }));
+  lazy(M, 'terrazzo', () => pbr(scan('terrazzo', { placeholder: '#e2dcd2', make: files({ color: 'terrazzo-color' }) }), { roughness: 0.3 }));
+  lazy(M, 'granite', () => pbr(scan('granite', { placeholder: '#5f5d5a', make: files({ color: 'granite-color' }) }), { roughness: 0.18 }));
+  lazy(M, 'zellige', () => pbr(scan('zellige', { placeholder: '#dfe6df', relief: 0.012, detail: 0.5, rough: through(0.25, 1, 0.6, 0.12), roughAt: 0.15, make: files({ color: 'zellige-color', height: 'zellige-height' }) }), { roughness: 0.9 }));
+  lazy(M, 'ash', () => pbr(scan('ash', { placeholder: '#cdb58f', relief: 0.0008, detail: 0.5, rough: through(0.3, 0.94, 0.7, 0.84), roughAt: 0.89, make: files({ color: 'ash-color', height: 'ash-height' }) }), { roughness: 0.62 }));
+  lazy(M, 'rattan', () => pbr(scan('rattan', { placeholder: '#c4a173', relief: 0.01, detail: 0.5, rough: through(0.3, 1, 0.7, 0.7), roughAt: 0.8, make: files({ color: 'rattan-color', height: 'rattan-height' }) }), { roughness: 0.8 }));
+  lazy(M, 'jute', () => cloth(scan('jute', { placeholder: '#c9b28c', relief: 0.01, detail: 0.5, make: weave('jute-tone') }), 0xc2a77c, { roughness: 1 }));
+  lazy(M, 'boucle', () => cloth(scan('boucle', { placeholder: '#e6e1d8', relief: 0.006, detail: 0.5, make: weave('boucle-tone') }), 0xe9e4da, { roughness: 1 }));
+  // Velvet: its pile catches the light at grazing angles (sheen).
+  lazy(M, 'velvet', () => Object.assign(new THREE.MeshPhysicalMaterial({
+    ...scan('velvet', { placeholder: '#cccccc', relief: 0.0015, detail: 0.5, rough: true, roughAt: 0.85, make: async (q) => { const [t, r] = await Promise.all([load('velvet-tone', q), load('velvet-rough', q)]); return { color: t, height: t, rough: r }; } }),
+    color: toned(0x4b5d4f), roughness: 0.9, sheen: 1, sheenRoughness: 0.35, sheenColor: new THREE.Color(0xb9c4b8),
+  }), { userData: { toned: true } }));
+  // Built-in finishes drawn from recipes.
+  lazy(M, 'floorChevron', () => recipeMaterial(M, preset('chevron')));
+  lazy(M, 'floorChecker', () => recipeMaterial(M, preset('checker')));
+  lazy(M, 'soapstone', () => recipeMaterial(M, preset('soapstone')));
+  lazy(M, 'herringboneTile', () => recipeMaterial(M, preset('herringbone-tile')));
+
   lazy(M, 'leather', () => cloth(textureSet({ feet: [0.8, 0.8], placeholder: '#cccccc', relief: 0.002, detail: 0.5, tone: [0.6, 0.96], rough: true, roughAt: 0.8, make: files({ height: 'leather-height', rough: 'leather-rough' }) }), 0x6a4430, { roughness: 0.62 }));
   return M;
 }

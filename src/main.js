@@ -24,6 +24,14 @@ import { fmtLen, fmtDims, fmtArea } from './units.js';
 // views (Dollhouse, Plan, Walk), with the furniture planner, the tape measure
 // and the panel around it. The unit is rebuilt whenever it changes on the
 // server, so Claude building it through MCP shows up live.
+//
+// The same page runs as a claude.ai Artifact (its first line sets
+// window.LIVING_SPACE): there the unit lives in the Artifact's own database,
+// through src/claude-store.js, and the people looking at it at the same time
+// see each other (src/together.js): both loaded only then, and starting now.
+// Matching a texture to a photo with the viewer's own Claude (src/match.js) is the Artifact's too.
+// It's an extra: if it can't load, the page goes on without it.
+const inClaude = window.LIVING_SPACE === 'artifact' ? Promise.all([import('./claude-store.js'), import('./together.js'), import('./match.js').catch(() => null)]) : null;
 
 const DEG = Math.PI / 180;
 const EYE = 5.2;
@@ -125,7 +133,8 @@ function buildPlanOverlay() {
   $('#overlayToggle').hidden = !pi;
   if (!pi) { $('#optOverlay').checked = false; return; }
   if (!planTextures.has(pi.src)) {
-    const tex = new THREE.TextureLoader().load(pi.src, () => invalidate());
+    // A one-file copy of the app carries the picture inline (keyed by its src).
+    const tex = new THREE.TextureLoader().load(globalThis.LIVING_SPACE_PLANS?.[pi.src] ?? pi.src, () => invalidate());
     tex.colorSpace = THREE.SRGBColorSpace;
     tex.anisotropy = 4;
     planTextures.set(pi.src, tex);
@@ -460,7 +469,8 @@ const layout = new LayoutEditor({
   clipping: () => renderer.clippingPlanes,
   onSelect: (id) => { stage.classList.toggle('piece-active', id != null); if (id != null) dismissHint(); },
   onOps: (ops) => session.queue(ops),
-  onAdded: () => { if (narrow()) setSheet(false); },
+  // A piece just added is meant to be dragged into place.
+  onAdded: () => { if (narrow()) setSheet(false); if (coarse && !moving) setMoving(true, { say: true }); },
   // Lamps light the room when on (src/lighting.js), and pieces you can switch
   // or open (lamps, TVs, curtains, fans) join the things you can use.
   onMount: (item, g) => { if (actOf(item, layout.assets) === 'light') lighting.addLamp(item.uid, g); things.addPiece(item, g); },
@@ -638,6 +648,7 @@ function showUnit(spec, { fresh = false } = {}) {
   measureUnit();
   lighting.setUnit(U);
   layout.setUnit(U);
+  renderMoveBtn();
   tape.setUnit(U);
   things.setUnit(U, { doors, movers: fixtures?.movers ?? [] });
   things.connectLighting(lighting);
@@ -666,9 +677,12 @@ function showUnit(spec, { fresh = false } = {}) {
 }
 
 // ---------------------------------------------------------------------------
-// Units on the server: opening, saving, sharing, view-only, your own version
+// Units on the server (or in an Artifact's database): opening, saving,
+// sharing, view-only, your own version
 let loadedHome = false;
-const session = new UnitSession({
+const [store, others, matching] = inClaude ? await inClaude : [];
+const Session = store ? store.ArtifactSession : UnitSession;
+const session = new Session({
   onLoad: (doc, ss) => {
     // Measurements stay when the same unit comes back (your own copy of it).
     const was = shownSpec;
@@ -677,6 +691,7 @@ const session = new UnitSession({
     if (shownSpec !== was) tape.clear();
     renderTapeUI();
     layout.load(doc ?? { items: [], assets: [] }, { readOnly: ss.role !== 'owner' });
+    renderMoveBtn();
     renderSession(ss);
     if (ss.role === 'home') setSheet(narrow());
     else if (narrow()) setSheet(false);
@@ -699,6 +714,34 @@ const session = new UnitSession({
   onState: (ss) => renderSession(ss),
 });
 
+// As an Artifact: everyone looking at it now, as figures where they walk, and
+// a way to hand a piece to the viewer's own Claude (src/together.js).
+const together = others?.createTogether({ scene, stage, invalidate }) ?? null;
+if (together) {
+  const use = (name) => { try { return Promise.resolve(window.claude?.use?.(name) ?? null).catch(() => null); } catch { return Promise.resolve(null); } };
+  Promise.all([use('room'), use('user')]).then(([room, user]) => together.connect(room, user)).then(() => { $('#peAsk').hidden = !together.canAsk; });
+}
+
+// Match a photo: the viewer's Claude designs a texture from it, for editors.
+const match = matching?.createMatch({ session, layout, getU: () => U, toast: (t) => layout.toast(t) }) ?? null;
+match?.connect();
+
+// The selected piece, handed to the viewer's Claude as data it can act on with
+// the skill's tools: inches, as they are. Called straight from the click.
+const inch = (ft) => Math.round(ft * 12 * 10) / 10;
+$('#peAsk').addEventListener('click', () => {
+  const it = layout.current;
+  if (!it || !together?.canAsk) return;
+  const room = U.roomAt(it.x, it.z);
+  together.ask({
+    label: `${it.name}${room ? ` in ${room.name}` : ''}`,
+    kind: 'piece', piece_id: it.uid, name: it.name, type: it.type === 'asset' ? `asset:${it.asset}` : it.type, room: room?.id ?? null,
+    at: [inch(it.x), inch(it.z)], rotation: it.rot, size: [inch(it.w), inch(it.d), inch(it.h)], on: it.on ? it.on.replace(/^[pf]:/, '') : 'floor',
+    unit: session.title || null,
+  }).then(() => layout.toast('It\'s in your message to Claude. Say what you\'d like, and send it.'),
+    () => layout.toast('Open this page next to your conversation with Claude to ask about a piece.'));
+});
+
 // Suggestions from copies of this unit, previewed one at a time in place of
 // the real furniture; and a copy suggesting its own layout back (src/suggestions.js).
 const suggest = createSuggestions({
@@ -715,7 +758,7 @@ const suggest = createSuggestions({
   },
 });
 
-const BUILD_PROMPT = 'Build my apartment in 3D Living Space from the floor plan and photos I\'m sharing. Work to scale: get the scale from the room sizes printed on the plan, trace each room as the clear floor inside its walls, then add every door (with the way it swings), the windows, the kitchen cabinets and appliances, the bathroom fixtures, closets and laundry, and the finishes you can see in the photos. Fix every problem the tools report, then tell me what you couldn\'t see and what you assumed.';
+const BUILD_PROMPT = 'Build my apartment in 3D Living Space from the floor plan and photos I\'m sharing. Work to scale: get the scale from the room sizes printed on the plan, trace each room as the clear floor inside its walls, then add every door (with the way it swings), the windows, the kitchen cabinets and appliances, the bathroom fixtures, closets and laundry, and the finishes you can see in the photos, with textures made to match the floors, counters and tile where the built-in ones don\'t. Fix every problem the tools report, then tell me what you couldn\'t see and what you assumed.';
 const FURNISH_PROMPT = 'Furnish my unit in 3D Living Space. First ask me how I live and what style I like. Then place furniture that fits: keep 36" walkways, don\'t block any door swings, and check every room\'s clearances before you finish.';
 $('#buildPromptText').textContent = BUILD_PROMPT;
 $('#furnishPromptText').textContent = FURNISH_PROMPT;
@@ -755,6 +798,7 @@ let codeFor = null;  // the unit whose edit code state the Share tab shows
 function renderSession(ss) {
   const role = ss.role, home = role === 'home', mine = role === 'owner', visitor = role === 'viewer';
   document.body.dataset.role = role;
+  match?.refresh();
   $('#welcome').hidden = !home;
   $('#unitView').hidden = home;
   panel.classList.toggle('welcome-mode', home);
@@ -806,9 +850,9 @@ function renderSession(ss) {
     $('#noticeCreate').hidden = role !== 'missing';
   }
 
-  // Links
+  // Links (an Artifact has none of its own, and no card to fetch)
   $('#shareGroup').hidden = !ss.id;
-  if (ss.id) {
+  if (ss.id && ss.kind !== 'artifact') {
     ui.viewLink.value = ss.viewUrl();
     const src = `api/units/${ss.id}/card.png?v=${ss.version}`;
     if (ui.card.getAttribute('src') !== src) ui.card.src = src;
@@ -820,7 +864,7 @@ function renderSession(ss) {
   $('#chipEdit').hidden = ss.isExample;
   ui.chip.classList.toggle('with-edit', !ss.isExample);
   $('#unlockGroup').hidden = ss.isExample;
-  if (mine && codeFor !== ss.id) { codeFor = ss.id; renderCode(null); ss.hasCode().then((set) => { if (codeFor === ss.id) renderCode(set); }); }
+  if (mine && codeFor !== ss.id && ss.kind !== 'artifact') { codeFor = ss.id; renderCode(null); ss.hasCode().then((set) => { if (codeFor === ss.id) renderCode(set); }); }
   if (!mine) codeFor = null;
 
   // Your units, here and on the home page
@@ -832,11 +876,55 @@ function renderSession(ss) {
   $$('[data-go="create"], [data-go="example"], [data-go="fork"]').forEach((b) => { b.disabled = ss.busy; });
   ui.homeStatus.dataset.state = ss.error && home ? 'error' : '';
   ui.homeStatus.textContent = home ? (ss.busy ? 'Making your unit…' : ss.error ?? '') : '';
+  if (ss.kind === 'artifact') renderInClaude(ss, empty);
 
   document.title = home ? '3D Living Space' : ss.id ? `${unitName(ss)} · 3D Living Space` : '3D Living Space';
   suggest.sync(ss);
   ready.session = role !== 'loading';
   invalidate();
+}
+
+// As a claude.ai Artifact (src/claude-store.js) there is one unit, shared from
+// claude.ai: editors furnish it; anyone else looks around and can make their
+// own version, which says where they are and offers the way back.
+function renderInClaude(ss, empty) {
+  const own = ss.showing === 'own', editor = ss.role === 'owner' && !own, visitor = ss.role === 'viewer';
+  // Until claude.ai says who is looking, nothing is on offer: an editor would see it flash by.
+  const waiting = visitor && ss.connecting;
+  document.body.dataset.role = own ? 'version' : waiting ? 'connecting' : ss.role;
+  const name = unitName(ss);
+  ui.line.textContent = ss.role === 'loading' ? '' : own ? `Your version of ${name}` : `${name}${ss.author ? ` · by ${ss.author}` : ''}`;
+  ui.lede.textContent = ss.role === 'loading' ? ''
+    : empty ? (editor ? 'Nothing built yet. Ask Claude to build it from your floor plan and photos.' : 'Nothing built yet. It shows up here as soon as Claude builds it.')
+      : editor ? 'Furnish it, measure it and walk through it. Everyone who opens this page sees your changes.'
+        : own ? 'Your own version. Furnish it your way, measure it and walk through it.'
+          : ss.hasVersion ? 'A to-scale model of an apartment. Look around, or open your own version of it.'
+            : 'A to-scale model of an apartment. Look around, then make your own version to furnish it your way.';
+
+  const offer = (visitor || own) && !empty && !waiting;
+  ui.chip.hidden = !offer;
+  ui.chip.classList.remove('with-edit');
+  $('#viewChipTag').textContent = own ? 'Your version' : 'View only';
+  ui.chipText.textContent = name;
+  ui.chip.querySelector('[data-go="fork"]').hidden = own;
+  ui.chip.querySelector('[data-go="original"]').hidden = !own;
+  stage.classList.toggle('visitor', offer);
+  ui.notice.hidden = !visitor || empty || waiting;
+  ui.noticeText.textContent = ss.hasVersion ? 'You have your own version of this unit. Open it to carry on, or look around this one.'
+    : 'You can look around but not change it. Make your own version to move things and add pieces. Only you see it.';
+  $('#shareNoticeText').textContent = ui.noticeText.textContent;
+  for (const b of $$('[data-go="fork"]')) {
+    b.dataset.make ??= b.textContent;
+    b.textContent = !ss.hasVersion ? b.dataset.make : b.closest('.view-chip') ? 'Open yours' : 'Open your version';
+  }
+
+  $('#versionNotice').hidden = !own;
+  $('#versionText').textContent = `Your own version of ${name}. Only you see it, and the original stays as it is.`;
+  const status = $('#versionStatus');
+  status.dataset.state = ss.status === 'error' ? 'error' : '';
+  status.textContent = ss.status === 'saving' ? 'Saving…' : ss.status === 'error' ? (ss.error || 'Not saved.')
+    : ss.ownKept === 'local' ? 'Saved in this browser only. Changes save as you go.' : 'Saved. Changes save as you go.';
+  if (ss.message) { layout.toast(ss.message); ss.message = null; }
 }
 
 function renderUnitList(ul, list, current) {
@@ -876,15 +964,22 @@ document.addEventListener('click', async (e) => {
   if (go === 'home') { if (session.role === 'home') setSheet(narrow()); else session.home({ push: true }); return; }
   if (go === 'retry') { session.retry(); return; }
   if (session.busy) return;
+  // As an Artifact: back from your own version to the unit everyone sees.
+  if (go === 'original') { session.original?.(); return; }
   const doc = go === 'create' ? await session.create()
     : go === 'example' ? await session.create({ from: 'example' })
       : await session.fork();
-  if (doc) {
+  if (doc && session.kind === 'artifact') {
+    const where = { db: 'Your own version. Only you see it, and changes save as you go.', local: 'Your own version, kept in this browser. Changes save as you go.' };
+    if (doc.created && where[session.ownKept]) layout.toast(where[session.ownKept]);
+  } else if (doc) {
     layout.toast(go === 'create' ? 'Your new unit is ready. Build it with Claude.' : 'This copy is yours. Changes save as you go.');
     if (go === 'create' && narrow()) setSheet(false);
   } else if (session.error) layout.toast(session.error);
 });
 $('#homeLink').addEventListener('click', (e) => { e.preventDefault(); if (session.role !== 'home') session.home({ push: true }); });
+// An Artifact has no home page: there the name is only a name.
+if (session.kind === 'artifact') $('#homeLink').replaceWith('3D Living Space');
 
 // ---------------------------------------------------------------------------
 // Edit codes: set one here, then on another device open the unit's link, tap
@@ -954,8 +1049,22 @@ async function copy(text, done) {
     await navigator.clipboard.writeText(text);
     layout.toast(done);
   } catch {
-    window.prompt('Copy this', text);
+    // An Artifact's frame may be kept from the clipboard: copy from a field instead.
+    if (session.kind === 'artifact' && copyFromField(text)) layout.toast(done);
+    else window.prompt('Copy this', text);
   }
+}
+function copyFromField(text) {
+  const field = make('textarea');
+  field.value = text;
+  field.readOnly = true;
+  field.style.cssText = 'position:fixed;top:0;left:0;opacity:0';
+  document.body.append(field);
+  field.select();
+  let ok = false;
+  try { ok = document.execCommand('copy'); } catch { /* not allowed either */ }
+  field.remove();
+  return ok;
 }
 document.addEventListener('click', (e) => {
   const b = e.target.closest('[data-copy]');
@@ -1067,6 +1176,11 @@ function drawMinimap() {
   g.globalAlpha = 1;
   g.beginPath(); g.arc(cx, cz, 4.5, 0, Math.PI * 2); g.fill();
   g.strokeStyle = colors.surface; g.lineWidth = 1.5; g.stroke();
+  // Others walking through it with you (an Artifact's room).
+  for (const w of together?.walkers() ?? []) {
+    g.fillStyle = w.color;
+    g.beginPath(); g.arc(ox + w.x * s, oz + w.z * s, 4, 0, Math.PI * 2); g.fill(); g.stroke();
+  }
 }
 mm.addEventListener('pointerdown', (e) => {
   if (!mmT) return;
@@ -1234,8 +1348,33 @@ $('#optFurniture').addEventListener('change', (e) => {
   furniture.visible = e.target.checked && !suggest.active;
   suggest.root.visible = e.target.checked;
   layout.select(null);
+  renderMoveBtn();
   invalidate();
 });
+
+// Phones and tablets: a drag on a piece moves it only while Move is on, so
+// turning the view or looking around never shoves the sofa. A tap still
+// selects it. Off at first; remembered in this browser.
+const MOVE_KEY = 'livingspace.move.v1';
+let moving = false;
+try { moving = localStorage.getItem(MOVE_KEY) === '1'; } catch { /* storage off */ }
+layout.movable = !coarse || moving;
+function setMoving(on, { say = false } = {}) {
+  moving = !!on;
+  try { localStorage.setItem(MOVE_KEY, moving ? '1' : '0'); } catch { /* storage off */ }
+  layout.movable = !coarse || moving;
+  renderMoveBtn();
+  if (say) layout.toast(moving ? 'Move is on: drag a piece to move it.' : 'Move is off: drags turn the view, taps select.');
+}
+function renderMoveBtn() {
+  const btn = $('#moveBtn');
+  const show = coarse && !layout.readOnly && !U.empty && $('#optFurniture').checked;
+  btn.hidden = !show;
+  btn.setAttribute('aria-pressed', String(moving));
+  btn.title = moving ? 'Move is on: drag pieces to move them' : 'Move furniture';
+  stage.classList.toggle('can-move', show);
+}
+$('#moveBtn').addEventListener('click', () => setMoving(!moving, { say: true }));
 $('#optLabels').addEventListener('change', (e) => { showLabels = e.target.checked; invalidate(); });
 $('#optCutaway').addEventListener('change', (e) => {
   cutaway = e.target.checked;
@@ -1344,11 +1483,14 @@ function frame(now = performance.now()) {
   changed = things.step(dt) || changed;
   changed = stepHighlight(dt) || changed;
   changed = lighting.update(activeCam(), dt) || changed;
+  together?.share(mode, walk);
   // The prompt for what you can use follows the view either way.
   if (!changed) { things.update(now); return; }
   needsRender = false;
+  together?.place(mode);
   renderer.render(scene, activeCam());
   updateLabels();
+  together?.tags((x, y, z) => project(x, y, z, activeCam()));
   layout.updateOverlay(activeCam());
   tape.update(activeCam());
   drawMinimap();
