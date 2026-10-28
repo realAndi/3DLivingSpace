@@ -758,7 +758,7 @@ const suggest = createSuggestions({
   },
 });
 
-const BUILD_PROMPT = 'Build my apartment in 3D Living Space from the floor plan and photos I\'m sharing. Work to scale: get the scale from the room sizes printed on the plan, trace each room as the clear floor inside its walls, then add every door (with the way it swings), the windows, the kitchen cabinets and appliances, the bathroom fixtures, closets and laundry, and the finishes you can see in the photos, with textures made to match the floors, counters and tile where the built-in ones don't. Fix every problem the tools report, then tell me what you couldn\'t see and what you assumed.';
+const BUILD_PROMPT = 'Build my apartment in 3D Living Space from the floor plan and photos I\'m sharing. Work to scale: get the scale from the room sizes printed on the plan, trace each room as the clear floor inside its walls, then add every door (with the way it swings), the windows, the kitchen cabinets and appliances, the bathroom fixtures, closets and laundry, and the finishes you can see in the photos, with textures made to match the floors, counters and tile where the built-in ones don\'t. Fix every problem the tools report, then tell me what you couldn\'t see and what you assumed.';
 const FURNISH_PROMPT = 'Furnish my unit in 3D Living Space. First ask me how I live and what style I like. Then place furniture that fits: keep 36" walkways, don\'t block any door swings, and check every room\'s clearances before you finish.';
 $('#buildPromptText').textContent = BUILD_PROMPT;
 $('#furnishPromptText').textContent = FURNISH_PROMPT;
