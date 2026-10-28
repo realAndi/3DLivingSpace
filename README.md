@@ -137,9 +137,8 @@ carries the skill as a plugin, which every Claude app installs, and on its own:
   draws the unit the same way and hands over the page as one HTML file
   (`bundle --single`) to download and open. The live, shareable page needs Claude
   Code (or the desktop app's Code tab).
-- **Claude Code:** `/plugin install 3d-living-space --marketplace realAndi/3DLivingSpace`
-  (until this branch is merged, `realAndi/3DLivingSpace#artifact-skill`), which
-  adds this repository's marketplace and installs the plugin from it; or unzip
+- **Claude Code:** `/plugin install 3d-living-space --marketplace realAndi/3DLivingSpace`,
+  which adds this repository's marketplace and installs the plugin from it; or unzip
   either zip into `~/.claude/skills/`. Then attach a floor plan and ask Claude to
   build it in 3D.
 - **The skill alone:** `3d-living-space.zip`, for Customize, Skills on claude.ai.
