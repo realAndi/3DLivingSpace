@@ -22,6 +22,7 @@
 // top of the plan, for the sun.
 
 import { pointInPoly, polygonArea, polyBounds, labelPoint, orientedRect, frontOf, rightOf, parseFeetInches } from './geometry.js';
+import { cleanTextures, isTexRef, texId } from './recipes.js';
 
 // ---------------------------------------------------------------------------
 // Vocabulary
@@ -30,7 +31,18 @@ export const ROOM_KINDS = ['living', 'kitchen', 'dining', 'bedroom', 'bath', 'cl
 export const OUTDOOR_KINDS = new Set(['balcony']);
 // Small rooms: smaller labels, no furniture suggestions.
 export const MINOR_KINDS = new Set(['closet', 'storage', 'pantry', 'utility', 'laundry']);
-export const FLOORS = ['wood', 'wood-dark', 'tile', 'stone', 'carpet', 'concrete', 'deck'];
+export const FLOORS = ['wood', 'wood-dark', 'herringbone', 'chevron', 'tile', 'hex-tile', 'checker', 'stone', 'slate', 'travertine', 'marble', 'terrazzo', 'carpet', 'concrete', 'deck'];
+// Floors laid like stone or tile: no baseboards, and they read as hard.
+const HARD = new Set(['tile', 'hex-tile', 'checker', 'stone', 'slate', 'travertine', 'marble', 'terrazzo']);
+// A floor, a finish or a color can also name one of the unit's own textures
+// (src/recipes.js), as "tex:<id>".
+export function hardFloor(floor, textures = []) {
+  if (isTexRef(floor)) {
+    const t = textures.find((x) => x.id === texId(floor));
+    return !!t && (['tile', 'stone', 'counter'].includes(t.for) || ['tiles', 'checker', 'hexagons'].includes(t.pattern.type));
+  }
+  return HARD.has(floor);
+}
 
 export const OPENING_TYPES = [
   { type: 'door', name: 'Door', about: 'A hinged door.' },
@@ -108,7 +120,7 @@ const KITCHEN_TYPES = { fridge: 'fridge', range: 'range', dishwasher: 'dishwashe
 export const FIXTURE_OPTIONS = {
   'kitchen-run': {
     segments: 'segments', uppers: 'bool', upper_bottom: 'len', upper_top: 'len', soffit: 'bool',
-    backsplash: ['subway', 'stone', 'none'], hood: ['microwave', 'hood', 'none'], drawers: 'bool',
+    backsplash: ['subway', 'zellige', 'hex', 'herringbone', 'marble', 'stone', 'none'], hood: ['microwave', 'hood', 'none'], drawers: 'bool',
   },
   island: { overhang: 'len', sink: 'bool', cooktop: 'bool' },
   'base-cabinet': { drawers: 'bool' },
@@ -125,13 +137,15 @@ export const FIXTURE_OPTIONS = {
 export const FINISH_OPTIONS = {
   walls: 'paint color, "#rrggbb"',
   floor: FLOORS,
-  cabinets: ['oak', 'walnut', 'white', 'gray', 'navy', 'sage', 'black'],
-  counters: ['quartz', 'marble', 'black', 'wood', 'concrete'],
-  backsplash: ['subway', 'stone', 'none'],
+  cabinets: ['oak', 'ash', 'walnut', 'white', 'gray', 'navy', 'sage', 'black'],
+  counters: ['quartz', 'marble', 'granite', 'soapstone', 'terrazzo', 'travertine', 'black', 'wood', 'concrete'],
+  backsplash: ['subway', 'zellige', 'hex', 'herringbone', 'marble', 'stone', 'none'],
   appliances: ['steel', 'white', 'black'],
   hardware: ['black', 'steel', 'brass'],
-  tile: ['warm-gray', 'white', 'charcoal'],
+  tile: ['warm-gray', 'white', 'charcoal', 'marble', 'zellige', 'terrazzo'],
 };
+// Finishes that can be one of the unit's textures instead.
+export const TEXTURED_FINISHES = ['floor', 'cabinets', 'counters', 'backsplash', 'tile'];
 export const DEFAULT_FINISHES = { walls: '#f2f1ee', floor: 'wood', cabinets: 'oak', counters: 'quartz', backsplash: 'subway', appliances: 'steel', hardware: 'black', tile: 'warm-gray' };
 
 export const UNIT_LIMITS = { rooms: 40, walls: 80, openings: 100, fixtures: 150, labels: 20, lights: 150, points: 48, name: 60, roomName: 40, text: 40 };
@@ -180,7 +194,7 @@ export function cleanRoom(raw, used = new Set(), why = []) {
     name: name || kind[0].toUpperCase() + kind.slice(1),
     kind,
     poly: p2,
-    floor: FLOORS.includes(raw?.floor) ? raw.floor : null,
+    floor: FLOORS.includes(raw?.floor) || isTexRef(raw?.floor) ? raw.floor : null,
   };
   const ceiling = num(raw?.ceiling, 6, 20, null);
   if (ceiling) out.ceiling = r4(ceiling);
@@ -257,7 +271,10 @@ function cleanOpts(type, raw = {}, why = [], id = '') {
     if (kind === 'bool') { if (typeof v === 'boolean') out[key] = v; }
     else if (kind === 'len') { const n = num(v, 0, 20, null); if (n !== null) out[key] = r4(n); }
     else if (kind === 'segments') { const s = cleanSegments(v, why, id); if (s) out[key] = s; }
-    else if (Array.isArray(kind)) { if (kind.includes(v)) out[key] = v; else why.push(`Fixture ${id}: ${key} must be one of ${kind.join(', ')}.`); }
+    else if (Array.isArray(kind)) {
+      if (kind.includes(v) || (key === 'backsplash' && isTexRef(v))) out[key] = v;
+      else why.push(`Fixture ${id}: ${key} must be one of ${kind.join(', ')}${key === 'backsplash' ? ', or "tex:<id>"' : ''}.`);
+    }
   }
   return out;
 }
@@ -278,7 +295,7 @@ export function cleanFixture(raw, used = new Set(), why = []) {
   };
   const name = text(raw?.name, UNIT_LIMITS.text);
   if (name) out.name = name;
-  const c = color(raw?.color) ?? (FINISH_OPTIONS.cabinets.includes(raw?.color) ? raw.color : null);
+  const c = color(raw?.color) ?? (FINISH_OPTIONS.cabinets.includes(raw?.color) || isTexRef(raw?.color) ? raw.color : null);
   if (c) out.color = c;
   const opts = cleanOpts(raw.type, raw.opts ?? {}, why, id);
   if (Object.keys(opts).length) out.opts = opts;
@@ -286,7 +303,7 @@ export function cleanFixture(raw, used = new Set(), why = []) {
 }
 
 export function emptyUnit() {
-  return { name: '', ...DEFAULTS, finishes: { ...DEFAULT_FINISHES }, rooms: [], walls: [], openings: [], fixtures: [], labels: [], lights: null, start: null, planImage: null };
+  return { name: '', ...DEFAULTS, finishes: { ...DEFAULT_FINISHES }, rooms: [], walls: [], openings: [], fixtures: [], labels: [], lights: null, start: null, planImage: null, textures: [] };
 }
 
 // The whole spec. Returns { unit, dropped }: what could not be used, and why.
@@ -308,12 +325,15 @@ export function cleanUnit(raw = {}) {
   const north = r4((((num(raw.north, -3600, 3600, 0)) % 360) + 360) % 360);
   if (north) u.north = north;
   const f = raw.finishes ?? {};
+  const tex = (v) => (isTexRef(v) ? v : null);
   u.finishes = {
     walls: color(f.walls) ?? DEFAULT_FINISHES.walls,
-    floor: FLOORS.includes(f.floor) ? f.floor : DEFAULT_FINISHES.floor,
-    cabinets: FINISH_OPTIONS.cabinets.includes(f.cabinets) ? f.cabinets : color(f.cabinets) ?? DEFAULT_FINISHES.cabinets,
-    ...Object.fromEntries(['counters', 'backsplash', 'appliances', 'hardware', 'tile'].map((k) => [k, FINISH_OPTIONS[k].includes(f[k]) ? f[k] : DEFAULT_FINISHES[k]])),
+    floor: FLOORS.includes(f.floor) ? f.floor : tex(f.floor) ?? DEFAULT_FINISHES.floor,
+    cabinets: FINISH_OPTIONS.cabinets.includes(f.cabinets) ? f.cabinets : color(f.cabinets) ?? tex(f.cabinets) ?? DEFAULT_FINISHES.cabinets,
+    ...Object.fromEntries(['counters', 'backsplash', 'appliances', 'hardware', 'tile'].map((k) => [k, FINISH_OPTIONS[k].includes(f[k]) ? f[k] : (TEXTURED_FINISHES.includes(k) && tex(f[k])) || DEFAULT_FINISHES[k]])),
   };
+  // Textures made for this unit, before what names them is checked.
+  u.textures = cleanTextures(raw.textures, why);
   const take = (list, max, clean, label) => {
     const arr = Array.isArray(list) ? list : [];
     if (arr.length > max) why.push(`Only ${max} ${label} fit; the rest were left out.`);
@@ -325,6 +345,16 @@ export function cleanUnit(raw = {}) {
   // Doors and windows share one id space, and fixtures another.
   u.openings = take(raw.openings, UNIT_LIMITS.openings, cleanOpening, 'doors and windows');
   u.fixtures = take(raw.fixtures, UNIT_LIMITS.fixtures, cleanFixture, 'fixtures');
+  // What names a texture the unit doesn't have goes back to its default.
+  const known = new Set(u.textures.map((t) => t.id));
+  const missing = (v) => isTexRef(v) && !known.has(texId(v));
+  const gone = (what, v) => why.push(`${what} names ${v}, but the unit has no texture "${texId(v)}"; make it with create_texture first.`);
+  for (const k of TEXTURED_FINISHES) if (missing(u.finishes[k])) { gone(`The ${k} finish`, u.finishes[k]); u.finishes[k] = DEFAULT_FINISHES[k]; }
+  for (const r of u.rooms) if (missing(r.floor)) { gone(`Room ${r.id}'s floor`, r.floor); r.floor = null; }
+  for (const x of u.fixtures) {
+    if (missing(x.color)) { gone(`Fixture ${x.id}'s color`, x.color); delete x.color; }
+    if (missing(x.opts?.backsplash)) { gone(`Fixture ${x.id}'s backsplash`, x.opts.backsplash); delete x.opts.backsplash; }
+  }
   u.labels = (Array.isArray(raw.labels) ? raw.labels : []).slice(0, UNIT_LIMITS.labels)
     .map((l) => ({ text: text(l?.text, UNIT_LIMITS.text), at: pt(l?.at) })).filter((l) => l.text && l.at);
   u.lights = Array.isArray(raw.lights) ? raw.lights.slice(0, UNIT_LIMITS.lights).map(pt).filter(Boolean) : null;
@@ -947,6 +977,7 @@ export function buildUnit(spec, { checks = true } = {}) {
 
   return {
     spec: u, empty: !rooms.length, heights: H, finishes: u.finishes, level: u.level, north: u.north ?? 0,
+    textures: u.textures ?? [], textureById: Object.fromEntries((u.textures ?? []).map((t) => [t.id, t])),
     rooms, roomById, labels: u.labels, edges, openings, fixtures,
     lights, views, start, bounds, planImage: u.planImage,
     area: indoor.reduce((a, r) => a + r.area, 0),

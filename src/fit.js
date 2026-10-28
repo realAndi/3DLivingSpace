@@ -11,6 +11,7 @@ import { footprint, isFlat } from './catalog.js';
 import { overlap, rectPoly, frontOf, rightOf, polyBounds } from './geometry.js';
 import { pieceBody, pieceParts, placeBody, fixtureParts } from './parts.js';
 import { relatives, restingProblems, wallProblem } from './stacking.js';
+import { hardFloor } from './unit.js';
 
 // Standing on the floor (not resting on something, hung or raised).
 export const onFloor = (item) => !item.on && !(item.y > 0.02);
@@ -203,7 +204,6 @@ export function findSpots({ w, d, h = 3, room = null, againstWall = true, items 
 const BASEBOARD = { t: 0.045, h: 0.42 };
 const CASING = { t: 0.06, w: 0.29 };
 const STOOL = { t: 0.1, past: 0.17, drop: 0.32 };
-const HARD_FLOORS = new Set(['tile', 'stone']);
 const TOUCH = 0.002;  // overlap smaller than this (about 1/40") counts as touching
 
 const shape = (poly, y0, y1, kind) => ({ poly, aabb: polyBounds(poly), y0, y1, kind });
@@ -224,7 +224,7 @@ export function collisionShapes(U) {
   // a strip fills that in and pieces stop at the outline), and the baseboard.
   for (const e of U.edges) {
     const r = U.roomById[e.room];
-    const base = !r.outdoor && !HARD_FLOORS.has(r.floor);
+    const base = !r.outdoor && !hardFloor(r.floor, U.textures);
     let s0 = null;
     for (let s = step / 2; s <= e.len; s += step) {
       const back = U.floorSolidAt(e.p[0] + e.u[0] * s + e.n[0] / 24, e.p[1] + e.u[1] * s + e.n[1] / 24);

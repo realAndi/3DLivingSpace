@@ -32,6 +32,13 @@ export function png(svg) {
   return new Resvg(svg, { font: { fontBuffers: fonts, defaultFontFamily: 'IBM Plex Sans' } }).render().asPng();
 }
 
+// An SVG's pixels: { w, h, rgba }, for reading a photo (create_texture --sample).
+export function pixels(svg) {
+  if (!fonts) throw new Error('The renderer isn\'t loaded: await ready() first.');
+  const image = new Resvg(svg).render();
+  return { w: image.width, h: image.height, rgba: new Uint8ClampedArray(image.pixels), png: image.asPng() };
+}
+
 // For doctor: a line in each font, drawn; ink counts the pixels it covered,
 // so 0 means the fonts didn't load.
 export async function selfTest() {

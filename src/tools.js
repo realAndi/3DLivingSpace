@@ -1,12 +1,13 @@
 // The tools an agent builds, checks and furnishes a unit with: their names,
 // what each says about itself and the shape of what it takes, checked with zod.
-// The same twelve whether Claude reaches a unit through its MCP address
+// The same thirteen whether Claude reaches a unit through its MCP address
 // (server/mcp.js) or through the skill's scripts (skill/3d-living-space); what
 // they do is src/agent.js. Inches and snake_case here, as src/unit.js
 // fromInches / toInches convert them. Server and skill only: the browser never
 // loads this file.
 import { z } from 'zod';
-import { SWATCHES, KINDS, PLACES } from './catalog.js';
+import { SWATCHES, KINDS, PLACES, MATERIALS } from './catalog.js';
+import { PATTERNS, LAYERS, USES, TEX_REF, TEXTURE_LIMITS } from './recipes.js';
 import { SHAPES, FINISHES, LIMITS } from './design.js';
 import {
   ROOM_KINDS, FLOORS, OPENING_TYPES, FIXTURES, SEGMENTS, FIXTURE_OPTIONS, FINISH_OPTIONS, UNIT_LIMITS,
@@ -21,16 +22,19 @@ const XZ = () => z.array(z.number()).length(2);
 const ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,23}$/;
 const idOf = (about) => z.string().regex(ID, 'Ids are 1 to 24 letters, digits, - or _, starting with a letter or digit.').describe(about);
 const hexColor = z.string().regex(/^#[0-9a-fA-F]{6}$/, 'A color is "#rrggbb".');
+// One of the unit's own textures, made with create_texture.
+const texRef = z.string().regex(TEX_REF, 'A texture is "tex:<id>", with the id create_texture gave it.');
+const OR_TEX = 'or "tex:<id>" for a texture made with create_texture to match a photo';
 
 const finishesShape = z.object({
   walls: hexColor.optional().describe('Wall paint color, "#rrggbb" (default #f2f1ee, a warm white).'),
-  floor: z.enum(FLOORS).optional().describe('Floor everywhere a room doesn\'t set its own. Baths default to tile and balconies to deck.'),
-  cabinets: z.union([z.enum(FINISH_OPTIONS.cabinets), hexColor]).optional().describe(`Kitchen and bath cabinets: ${FINISH_OPTIONS.cabinets.join(', ')}, or a paint color "#rrggbb".`),
-  counters: z.enum(FINISH_OPTIONS.counters).optional().describe('Countertops.'),
-  backsplash: z.enum(FINISH_OPTIONS.backsplash).optional().describe('Kitchen backsplash: subway tile, a stone slab, or none.'),
+  floor: z.union([z.enum(FLOORS), texRef]).optional().describe(`Floor everywhere a room doesn't set its own: ${FLOORS.join(', ')}, ${OR_TEX}. Baths default to tile and balconies to deck.`),
+  cabinets: z.union([z.enum(FINISH_OPTIONS.cabinets), hexColor, texRef]).optional().describe(`Kitchen and bath cabinets: ${FINISH_OPTIONS.cabinets.join(', ')}, a paint color "#rrggbb", ${OR_TEX}.`),
+  counters: z.union([z.enum(FINISH_OPTIONS.counters), texRef]).optional().describe(`Countertops: ${FINISH_OPTIONS.counters.join(', ')}, ${OR_TEX}.`),
+  backsplash: z.union([z.enum(FINISH_OPTIONS.backsplash), texRef]).optional().describe(`Kitchen backsplash: ${FINISH_OPTIONS.backsplash.join(', ')} (stone: a slab of the counter), ${OR_TEX}.`),
   appliances: z.enum(FINISH_OPTIONS.appliances).optional().describe('Fridge, range, dishwasher and microwave.'),
   hardware: z.enum(FINISH_OPTIONS.hardware).optional().describe('Cabinet pulls, faucets and door handles.'),
-  tile: z.enum(FINISH_OPTIONS.tile).optional().describe('Bathroom wall and shower tile.'),
+  tile: z.union([z.enum(FINISH_OPTIONS.tile), texRef]).optional().describe(`Bath tile (tile floors, tiled walls, tub and shower surrounds): ${FINISH_OPTIONS.tile.join(', ')}, ${OR_TEX}.`),
 });
 
 const settingsShape = {
@@ -53,7 +57,7 @@ const roomFields = {
   name: z.string().max(UNIT_LIMITS.roomName).describe('Shown on the plan and in 3D, like "Primary Bedroom". Never an address or unit number.'),
   kind: z.enum(ROOM_KINDS).describe('What the room is. It sets defaults: baths get tile floors; closets, storage, pantries, utility rooms and laundry get small labels and no furniture suggestions; a balcony is outdoors and gets no outside wall.'),
   outline: z.array(XZ()).min(3).max(UNIT_LIMITS.points).describe('Corners of the clear floor inside the walls, in order around the room, each [x, z] in inches. A rectangle is four corners, [[x0, z0], [x1, z0], [x1, z1], [x0, z1]]; an L-shaped room has six.'),
-  floor: z.enum(FLOORS).optional().describe('This room\'s floor, when it differs from the unit\'s floor finish (baths default to tile, balconies to deck).'),
+  floor: z.union([z.enum(FLOORS), texRef]).optional().describe(`This room's floor, when it differs from the unit's floor finish (baths default to tile, balconies to deck): ${FLOORS.join(', ')}, ${OR_TEX}.`),
   ceiling_height: z.number().min(72).max(240).optional().describe('This room\'s ceiling height in inches, when it differs from the unit\'s.'),
   plan_size: z.string().max(30).optional().describe('The size printed on the floor plan, as written, like 12\'7" x 19\'9". The outline is checked against it.'),
   label_at: XZ().optional().describe('Where the room\'s name goes, [x, z] in inches, when the middle is a bad spot.'),
@@ -124,6 +128,7 @@ const optionFields = (() => {
   return Object.fromEntries(Object.entries(keys).map(([key, { kind, types }]) => {
     const base = kind === 'bool' ? z.boolean() : kind === 'len' ? z.number().min(0).max(240)
       : kind === 'segments' ? z.array(segmentSchema).max(24)
+      : key === 'backsplash' ? z.union([z.enum(kind), texRef])
       : kind.every((v) => typeof v === 'string') ? z.enum(kind) : z.union(kind.map((v) => z.literal(v)));
     return [key, base.optional().describe(`${types.join(', ')} only. ${OPTION_ABOUT[key] ?? ''}`.trim())];
   }));
@@ -138,7 +143,7 @@ const fixtureFields = {
   height: z.number().min(0).max(240).optional().describe('Inches: counter height for cabinets, rod height for closets, how high the tile and glass go for showers and tiled walls. Default: the catalog size.'),
   rotation: z.number().optional().describe('Degrees clockwise on the plan (default 0). 0 = its front faces south, so its back is on a north wall; 90 = front faces west (back on an east wall); 180 = faces north (back on a south wall); 270 = faces east (back on a west wall).'),
   name: z.string().max(UNIT_LIMITS.text).optional().describe('Like "Kitchen: sink wall" or "Hall bath vanity".'),
-  color: z.string().optional().describe(`This fixture's cabinet color: ${FINISH_OPTIONS.cabinets.join(', ')} or "#rrggbb". Default: the unit's cabinets finish.`),
+  color: z.string().optional().describe(`This fixture's cabinet color: ${FINISH_OPTIONS.cabinets.join(', ')}, "#rrggbb" ${OR_TEX}. Default: the unit's cabinets finish.`),
   snap: z.boolean().optional().describe('Fixtures that stand against a wall (wall: true in get_catalog) are slid back until they touch the wall behind them, when one is within a foot. Pass false to keep exactly the position you give. Not stored.'),
   ...optionFields,
 };
@@ -157,7 +162,8 @@ const itemShape = {
   width: z.number().positive().max(360).optional().describe('Side to side as you face its front, inches. Default: the catalog or asset size.'),
   depth: z.number().positive().max(360).optional().describe('Back to front, inches (a bed\'s length).'),
   height: z.number().positive().max(108).optional().describe('Inches.'),
-  color: z.string().optional().describe(`A swatch (${SWATCHES.filter((s) => s.key).map((s) => s.key).join(', ')}) or "#rrggbb". Omit for the piece's own finish.`),
+  color: z.string().optional().describe(`A swatch (${SWATCHES.filter((s) => s.key).map((s) => s.key).join(', ')}) or "#rrggbb". Omit for the piece's own finish. It tints the piece's upholstery or main material where that takes a color (${MATERIALS.filter((m) => m.tint).map((m) => m.key).join(', ')}).`),
+  material: z.union([z.enum(MATERIALS.map((m) => m.key)), texRef]).optional().describe(`What the piece's main part is made of (a sofa's upholstery, a table's top and legs, a dresser's case): ${MATERIALS.map((m) => m.key).join(', ')}, ${OR_TEX}. Omit for its own.`),
   name: z.string().max(LIMITS.name).optional().describe('Label shown in the app, like "Grandma\'s armchair".'),
   on: z.string().max(40).optional().describe('What it rests on or hangs from: "floor"; "wall" (hung against the wall nearest at, facing into the room); "ceiling"; or the id of a placed piece (a table, nightstand, dresser, desk, bookshelf, TV stand, wall shelf; holds_items in get_catalog) or of a fixture (a kitchen run\'s counter, an island, a bar counter, a vanity, a washer) to stand on. Default from its placement in get_catalog: surface pieces land on whatever is under at, else the floor; wall pieces on the nearest wall; ceiling pieces on the ceiling.'),
   elevation: z.number().min(0).max(228).optional().describe('Inches from the floor to its underside. For a wall piece, how high it hangs (default in get_catalog). For a piece on a bookshelf, picks the shelf nearest this height. Floor, ceiling and other resting pieces get theirs from what holds them.'),
@@ -205,7 +211,7 @@ Returns the same report as build_unit. Check the result with render_plan.`,
       openings: z.array(patchOf(openingFields, 'opening')).max(UNIT_LIMITS.openings).optional().describe('Doors, windows and doorways to change or add, by id.'),
       fixtures: z.array(patchOf(fixtureFields, 'fixture')).max(UNIT_LIMITS.fixtures).optional().describe('Fixtures to change or add, by id. Options (segments, hood…) are fields of the fixture; passing segments replaces the whole list.'),
       labels: z.array(z.object(labelFields)).max(UNIT_LIMITS.labels).optional().describe('All extra labels; REPLACES the current ones.'),
-      remove: z.array(z.string()).max(200).optional().describe('Ids of rooms, walls, openings or fixtures to remove.'),
+      remove: z.array(z.string()).max(200).optional().describe('Ids of rooms, walls, openings, fixtures or textures to remove. What used a removed texture goes back to its default.'),
     },
     annotations: { destructiveHint: true },
   },
@@ -279,7 +285,65 @@ Parts are in inches in the piece's own frame: +x to the piece's right as you fac
         rot: z.array(z.number()).length(3).optional().describe('[x, y, z] degrees, applied in x, y, z order; [90, 0, 0] lays a cylinder along z.'),
         color: z.string().optional().describe('"#rrggbb".'),
         finish: z.enum(FINISHES).optional().describe(`${FINISHES.join(', ')}. glow: a lamp's shade or bulb, lit while it's on.`),
+        material: z.union([z.enum(MATERIALS.map((m) => m.key)), texRef]).optional().describe(`Instead of color and finish: ${MATERIALS.map((m) => m.key).join(', ')}, ${OR_TEX} (a rug's pattern, a cane seat).`),
       })).min(1).max(LIMITS.parts).describe(`Up to ${LIMITS.parts} parts.`),
+    },
+  },
+  {
+    name: 'create_texture',
+    title: 'Make a texture from a photo',
+    description: `Design a texture that looks like a real surface in the person's photos (their floor, countertop, backsplash, cabinet fronts, tile, sofa fabric, rug), then use it as "tex:<id>": in finishes, a room's floor, a fixture's color, a piece's or a custom part's material (or pass apply_to). The texture is a recipe, drawn the same everywhere: a pattern lays the surface out in pieces (planks, tiles, herringbone…), each taking one of its colors, and layers draw grain, veins, chips, pits, weave and mottling into every piece, at real sizes in inches.
+
+Work from the photo: read the pattern and its sizes (count planks or tiles against something of known size: a 3" plank, a 12" tile, a 25" deep counter), the main colors (the base, two to four piece colors a little apart, the joint color) and what's on the surface (grain, veins, speckle). Returns a picture: the surface at its real scale and a close-up, lit as it will be. Compare it with the photo, then call again with texture_id to adjust it until the colors, contrast and scale match; the measured colors and contrast are in the reply too. get_catalog's texture_examples are good starting points.`,
+    inputSchema: {
+      texture_id: z.string().optional().describe('Replace this texture of the unit\'s instead of making a new one; whatever uses it updates.'),
+      name: z.string().max(TEXTURE_LIMITS.name).describe('Like "Living room oak herringbone" or "Kitchen quartz".'),
+      about: z.string().max(TEXTURE_LIMITS.about).optional().describe('What the real surface is, in a sentence.'),
+      for: z.enum(USES).describe('What it is: sets the size it\'s drawn at and its default finish.'),
+      base: hexColor.describe('The ground color: the surface\'s overall color, or the grout or background showing between what the layers draw.'),
+      pattern: z.object({
+        type: z.enum(PATTERNS).describe('none: one surface (a slab of stone, a fabric, concrete). planks: boards in rows along x, staggered (bond). tiles: rectangular tiles in a grid (bond offsets rows: 0.5 running bond). checker: squares in two alternating colors. herringbone and chevron: planks in zigzags. basketweave: blocks of strips at right angles. hexagons. stripes and plaid: bands of color (plaid crosses them), for fabrics and rugs.'),
+        size: z.array(z.number().min(0.05).max(120)).max(12).optional().describe('Inches. planks, herringbone, chevron: [width, length] (herringbone lengths are rounded to whole widths); tiles: [width, height]; checker and hexagons: [width] (hexagons across the flats); basketweave: [strip width]; stripes and plaid: each band\'s width in turn, the colors taken in the same order.'),
+        colors: z.array(hexColor).max(TEXTURE_LIMITS.colors).optional().describe('Each piece takes one at random (in order for checker, stripes and plaid). Real floors and stone vary a little from piece to piece: give two to four close colors. Default: base.'),
+        vary: z.number().min(0).max(1).optional().describe('How much each piece\'s lightness varies besides, 0 to 1 (default 0.2).'),
+        joint: z.number().min(0).max(2).optional().describe('Width of the grout or gap between pieces, inches (default: a hairline for planks, ⅛ for tiles).'),
+        joint_color: hexColor.optional().describe('Grout or gap color (default: a darker base).'),
+        bevel: z.number().min(0).max(2).optional().describe('Inches of rounded edge on each piece.'),
+        bond: z.union([z.number().min(0).max(1), z.literal('random')]).optional().describe('planks and tiles: how far each row is offset, as a fraction of a piece\'s length (0.5 running bond, 0.33 a third), or "random" (planks\' default).'),
+        angle: z.number().optional().describe('Degrees the pattern is turned: quarter turns, and 45 for herringbone (its default, the zigzag running along x), checker (diamonds), square tiles, stripes and plaid. Other angles round to those.'),
+        strips: z.number().int().min(2).max(6).optional().describe('basketweave: strips per block (default 3).'),
+        cut: z.number().min(20).max(70).optional().describe('chevron: the angle its ends are cut at, degrees (default 45).'),
+      }).describe('How the surface is laid out.'),
+      layers: z.array(z.object({
+        type: z.enum(LAYERS).describe('mottle: soft clouds (color, or lighter and darker without). grain: wood grain along each piece (scale: inches between grain lines, wave, figure, knots). veins: marble veins (width, scale: inches between them, angle, turbulence). speckle: chips and flecks, each a random one of colors (granite, terrazzo, quartz; scale: chip size). pits: small holes (travertine, concrete). noise: fine grit, lighter and darker. weave: threads (scale: thread width; twill).'),
+        color: hexColor.optional().describe('The color it draws in (grain lines, veins, weft threads, clouds).'),
+        colors: z.array(hexColor).max(TEXTURE_LIMITS.colors).optional().describe('speckle and pits: the chips\' colors.'),
+        amount: z.number().min(0).max(1).optional().describe('How strong, 0 to 1: opacity for colored layers, how many chips for speckle.'),
+        scale: z.number().min(0.01).max(120).optional().describe('Inches: the size of its features, as the type says.'),
+        depth: z.number().min(-1).max(1).optional().describe('How much its marks rise (+) or sink (-) in the surface\'s relief (default by type: grain sinks, pits sink, weave rises).'),
+        rough: z.number().min(-1).max(1).optional().describe('How much rougher (+) or glossier (-) its marks are.'),
+        wave: z.number().min(0).max(1).optional().describe('grain: how much the lines waver.'),
+        figure: z.enum(['straight', 'cathedral']).optional().describe('grain: straight (rift or quarter sawn) or cathedral arches (flat sawn).'),
+        knots: z.number().min(0).max(1).optional().describe('grain: the share of pieces with a knot.'),
+        width: z.number().min(0.005).max(6).optional().describe('veins: inches wide.'),
+        angle: z.number().optional().describe('veins: the way they run, degrees.'),
+        turbulence: z.number().min(0).max(1).optional().describe('veins: how much they wander.'),
+        vary: z.number().min(0).max(1).optional().describe('speckle and pits: how much chip sizes vary.'),
+        twill: z.boolean().optional().describe('weave: a twill (diagonal) weave instead of plain.'),
+      })).max(TEXTURE_LIMITS.layers).optional().describe('Drawn in order over each piece, in its own frame (grain runs along each plank).'),
+      finish: z.object({
+        roughness: z.number().min(0.02).max(1).optional().describe('0 mirror-polished, 1 fully matte (default by for: counters 0.22, floors 0.6, fabric 0.95).'),
+        relief: z.number().min(0).max(1).optional().describe('How deep joints, grain and weave read in 3D (default 0.5).'),
+        sheen: z.number().min(0).max(1).optional().describe('Velvet and satin fabrics: the glow at grazing angles.'),
+        metal: z.number().min(0).max(1).optional().describe('Metal surfaces.'),
+      }).optional().describe('How it takes the light.'),
+      repeat: z.number().min(2).max(120).optional().describe('Inches of surface the picture covers before it repeats (default by for); patterns round it to whole pieces.'),
+      apply_to: z.object({
+        finishes: z.array(z.enum(['floor', 'cabinets', 'counters', 'backsplash', 'tile'])).optional().describe('Unit finishes to set to it.'),
+        rooms: z.array(z.string()).optional().describe('Ids of rooms whose floor it becomes.'),
+        fixtures: z.array(z.string()).optional().describe('Ids of fixtures whose cabinets it becomes.'),
+        pieces: z.array(z.string()).optional().describe('Ids of placed pieces whose material it becomes.'),
+      }).optional().describe('Use it at once.'),
     },
   },
   {

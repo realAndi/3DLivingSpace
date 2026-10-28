@@ -31,7 +31,8 @@ export const RULES = [
   { path: 'suggestions/{self}', read: 'interact', write: 'interact' },
 ];
 // room: who else has the page open, and handing a piece to the viewer's own Claude.
-export const CAPABILITIES = { db: { rules: RULES }, user: { scopes: ['profile'] }, room: {} };
+// sample: asking the viewer's Claude, with a photo, to match a texture to it (src/match.js).
+export const CAPABILITIES = { db: { rules: RULES }, user: { scopes: ['profile'] }, room: {}, sample: { images: true } };
 const DOC_BYTES = 256 * 1024;
 // ArtifactData's batch: 50 writes and 1 MiB, kept a little under.
 const BATCH = { writes: 50, bytes: 1000 * 1000 };

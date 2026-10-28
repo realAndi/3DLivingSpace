@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import { CATALOG, catalogByType, SWATCHES, buildPiece, nearPiece, isFlat } from './furniture.js';
+import { CATALOG, catalogByType, SWATCHES, MATERIALS, buildPiece, nearPiece, isFlat } from './furniture.js';
+import { materialLook, recipeThumb } from './materials.js';
 import { KINDS, placeOf, actOf } from './catalog.js';
 import { clearances, problems, blockersFor, trimRects, collides, pushOut, slideTo, slideOnWall, onFloor } from './fit.js';
 import { descendants, carry, supportOf, surfacesAt, surfaceUnder, fitOnSurface, hangOnWall, wallProblem, walkThrough, ceilingAt, ceilingY, facing } from './stacking.js';
@@ -64,6 +65,8 @@ export class LayoutEditor {
     this.selected = null;
     this.enabled = true;
     this.readOnly = false;
+    // Whether a drag on a piece moves it (phones turn it off: src/main.js).
+    this.movable = true;
     this.dragging = null;
     this.collide = true;
     try { this.collide = localStorage.getItem(COLLIDE_KEY) !== 'off'; } catch { /* default */ }
@@ -129,7 +132,13 @@ export class LayoutEditor {
 
   // A new or rebuilt unit: walls and fixtures moved, so guides and warnings change.
   setUnit(U) {
+    const before = JSON.stringify(this.U?.textures ?? []);
     this.U = U;
+    // A texture changed: pieces made of one are built again.
+    if (JSON.stringify(U?.textures ?? []) !== before) {
+      for (const item of this.items) if (/^tex:/.test(item.material ?? '') || this.assets[item.asset]?.parts.some((p) => p.material)) this.#mount(item);
+      this.#renderMaterials();
+    }
     this.#refreshSelection();
     this.invalidate();
   }
@@ -358,7 +367,7 @@ export class LayoutEditor {
   // ---------------------------------------------------------------- scene
   #mount(item) {
     this.#unmount(item.uid);
-    const g = buildPiece(this.M, item, this.assets);
+    const g = buildPiece(this.M, item, this.assets, this.U?.textures);
     this.root.add(g);
     this.groups.set(item.uid, g);
     this.onMount?.(item, g);
@@ -862,6 +871,7 @@ export class LayoutEditor {
     const el = this.canvas;
     let drag = null;
     let empty = null;
+    let tap = null;
     // Capture phase, so a press on a piece never reaches the camera controls.
     el.addEventListener('pointerdown', (e) => {
       // With the cursor locked in Walk, clicks belong to the crosshair.
@@ -869,6 +879,12 @@ export class LayoutEditor {
       const pick = this.#pick(e);
       if (!pick) {
         empty = { x: e.clientX, y: e.clientY, id: e.pointerId };
+        return;
+      }
+      // Pieces that don't move: the press goes on to the view, and only a
+      // tap (no drag) selects.
+      if (!this.movable && !this.readOnly) {
+        tap = { uid: pick.uid, x: e.clientX, y: e.clientY, id: e.pointerId };
         return;
       }
       if (this.selected !== pick.uid) this.select(pick.uid);
@@ -921,6 +937,11 @@ export class LayoutEditor {
         }
         drag = null;
         this.dragging = null;
+        return;
+      }
+      if (tap && e.pointerId === tap.id) {
+        if (e.type === 'pointerup' && Math.hypot(e.clientX - tap.x, e.clientY - tap.y) < 8) this.select(tap.uid);
+        tap = null;
         return;
       }
       // A tap on empty space clears the selection.
@@ -1123,6 +1144,7 @@ export class LayoutEditor {
     this.ui = {
       catalog: $('#catalog'), kinds: $('#kindChips'), mine: $('#assetList'), mineGroup: $('#assetGroup'), list: $('#layoutList'), empty: $('#layoutEmpty'), editor: $('#pieceEditor'),
       name: $('#peName'), w: $('#peW'), d: $('#peD'), h: $('#peH'), rot: $('#peRot'), swatches: $('#peSwatches'), warn: $('#peWarn'),
+      materials: $('#peMaterials'), materialName: $('#peMaterialName'),
       place: $('#pePlace'), yField: $('#peYField'), y: $('#peY'), on: $('#peOn'), floor: $('#peFloor'),
       bar: $('#pieceBar'), barName: $('#pbName'), barDims: $('#pbDims'), barWarn: $('#pbWarn'), toast: $('#toast'), count: $('#furnitureCount'),
       suffixes: [...document.querySelectorAll('[data-len-unit]')],
@@ -1148,6 +1170,15 @@ export class LayoutEditor {
     this.ui.swatches.addEventListener('click', (e) => {
       const b = e.target.closest('[data-color]');
       if (b && this.current) this.update(this.current.uid, { color: b.dataset.color || null });
+    });
+    this.#renderMaterials();
+    this.ui.materials?.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-material]');
+      if (!b || !this.current) return;
+      // Oak and walnut were colors once; as materials, they stop being one.
+      const patch = { material: b.dataset.material || null };
+      if (['oak', 'walnut'].includes(this.current.color)) patch.color = null;
+      this.update(this.current.uid, patch);
     });
     const dim = (input, key) => input.addEventListener('change', () => {
       const ft = fromInput(input.value);
@@ -1318,9 +1349,32 @@ export class LayoutEditor {
     ui.on.textContent = on ?? '';
     ui.floor.hidden = !down;
     ui.swatches.querySelectorAll('[data-color]').forEach((b) => b.setAttribute('aria-pressed', String((b.dataset.color || null) === item.color)));
+    // Colors tint weaves and leather; wood, stone and the unit's textures show their own.
+    const mat = item.material ?? null, tints = !mat || MATERIALS.some((m) => m.key === mat && m.tint);
+    ui.materials?.querySelectorAll('[data-material]').forEach((b) => b.setAttribute('aria-pressed', String((b.dataset.material || null) === mat)));
+    ui.swatches.hidden = !tints;
+    if (ui.materialName) ui.materialName.textContent = this.#materialName(mat);
     const issues = this.#problems(item);
     ui.warn.hidden = !issues.length;
     ui.warn.textContent = issues.length ? `This piece ${issues.join(', ')}.` : '';
+  }
+
+  // The material buttons: the piece's own, the built-in ones, and the unit's
+  // textures (src/recipes.js), each showing what it looks like.
+  #renderMaterials() {
+    const el = this.ui?.materials;
+    if (!el) return;
+    const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    const own = (this.U?.textures ?? []).map((t) => ({ key: `tex:${t.id}`, name: t.name, style: `background:url("${recipeThumb(t)}") center/cover` }));
+    const all = [{ key: '', name: 'Its own', style: 'background:conic-gradient(#8e8984 0 25%, #7b5a3e 0 50%, #e9e5dd 0 75%, #5f5b56 0)' },
+      ...own, ...MATERIALS.map((m) => ({ key: m.key, name: m.name, style: materialLook(m.key) }))];
+    el.innerHTML = all.map((m) => `<button class="material${m.key.startsWith('tex:') ? ' made' : ''}" data-material="${esc(m.key)}" aria-label="${esc(m.name)}" title="${esc(m.name)}" style='${m.style}'></button>`).join('');
+    if (this.current) this.#renderEditor();
+  }
+  #materialName(key) {
+    if (!key) return 'Its own material';
+    if (key.startsWith('tex:')) return this.U?.textures?.find((t) => `tex:${t.id}` === key)?.name ?? 'A texture';
+    return MATERIALS.find((m) => m.key === key)?.name ?? key;
   }
 
   // What is wrong with where a piece sits (src/fit.js), as short phrases.

@@ -17,8 +17,9 @@
 // it is (`place` and `kind`, as in src/catalog.js), and a lamp says where its
 // bulb is (`light`, inches in the same frame), which makes it switch on and off.
 
-import { catalogByType, swatchKeys, PLACES, KINDS } from './catalog.js';
+import { catalogByType, swatchKeys, materialKeys, PLACES, KINDS } from './catalog.js';
 import { cleanUnit } from './unit.js';
+import { isTexRef } from './recipes.js';
 
 export const LIMITS = { items: 150, assets: 40, parts: 120, title: 60, author: 40, name: 40, description: 200, partInches: 240 };
 export const SHAPES = ['box', 'cylinder', 'cone', 'sphere'];
@@ -39,6 +40,10 @@ const text = (v, max) => (typeof v === 'string' ? v.replace(/[\u0000-\u001f\u007
 const uidOk = (v) => typeof v === 'string' && /^[A-Za-z0-9_-]{2,24}$/.test(v);
 const r3 = (v) => Math.round(v * 1000) / 1000;
 
+// A built-in material (src/catalog.js MATERIALS) or one of the unit's
+// textures. Whether that texture exists is the unit's to say.
+export const cleanMaterial = (v) => (materialKeys.includes(v) || isTexRef(v) ? v : null);
+
 export function cleanColor(v) {
   if (v == null || v === '') return null;
   if (swatchKeys.includes(v)) return v;
@@ -57,6 +62,7 @@ function cleanPart(p) {
     rot: v3(p.rot, -360, 360, 0),
     color: cleanColor(p.color) ?? '#b8b2a8',
     finish: FINISHES.includes(p.finish) ? p.finish : 'matte',
+    ...(cleanMaterial(p.material) && p.finish !== 'glow' ? { material: p.material } : {}),
   };
 }
 
@@ -130,6 +136,8 @@ export function cleanItem(raw, assets = {}) {
     rot: r3((((num(raw.rot, -3600, 3600, 0)) % 360) + 360) % 360),
     color: cleanColor(raw.color),
   };
+  const material = cleanMaterial(raw.material);
+  if (material) item.material = material;
   if (asset) item.asset = asset.id;
   const y = r3(num(raw.y, 0, 19, 0));
   if (y > 0) item.y = y;

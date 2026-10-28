@@ -21,7 +21,40 @@ export function namespace(name, config) {
   if (name === 'db') return config.level === 'none' ? null : dbNamespace(config);
   if (name === 'user') return userNamespace(config);
   if (name === 'room') return roomNamespace(config);
+  if (name === 'sample') return sampleNamespace();
   return null;
+}
+
+// use("sample"), as sample.d.ts has it, with a scripted Claude in place of a
+// real one: json() checks the call as the platform would, runs the page's
+// first tool on a recipe, then on a darker one, and answers with that.
+// Records each call on window.__mock.samples.
+const TRIALS = [
+  { name: 'Oak herringbone', base: '#b48a5c', pattern: { type: 'herringbone', size: [3, 18], colors: ['#b48a5c', '#a87e52', '#c09668'], vary: 0.2 }, layers: [{ type: 'grain', color: '#7d5a37', amount: 0.45, scale: 0.18 }] },
+  { name: 'Oak herringbone', base: '#a27a4e', pattern: { type: 'herringbone', size: [3, 18], colors: ['#a27a4e', '#97714a', '#ad8458'], vary: 0.15 }, layers: [{ type: 'grain', color: '#73522f', amount: 0.4, scale: 0.18 }] },
+];
+function sampleNamespace() {
+  const log = (window.__mock.samples ??= []);
+  const reject = (code, message) => Promise.reject({ code, message });
+  async function json(input, opts = {}) {
+    if (typeof input !== 'string' && !Array.isArray(input)) return reject('invalid_request', 'input must be a string or turns');
+    if (opts.signal?.aborted) return reject('cancelled', 'aborted');
+    const images = opts.images ? [].concat(opts.images) : [];
+    if (!images.every((b) => b instanceof Blob)) return reject('invalid_request', 'images must be Blobs');
+    const entry = { prompt: String(input).slice(0, 200), images: images.map((b) => ({ type: b.type, size: b.size })), tools: (opts.tools ?? []).map((t) => t.name), results: [] };
+    log.push(entry);
+    const tool = opts.tools?.[0];
+    for (const recipe of TRIALS) {
+      await new Promise((r) => setTimeout(r, 250));
+      if (opts.signal?.aborted) return reject('cancelled', 'aborted');
+      if (tool) { try { entry.results.push(await tool.execute({ recipe }, { signal: opts.signal })); } catch (e) { entry.results.push(`Error: ${e.message}`); } }
+    }
+    return structuredClone(TRIALS[TRIALS.length - 1]);
+  }
+  const sample = (input, opts) => json(input, opts).then((v) => ({ text: JSON.stringify(v), truncated: false, modelTierApplied: 'default' }));
+  sample.json = json;
+  sample.limits = () => Promise.resolve({ maxPromptBytes: 262144, images: { maxCount: 4, maxInputBytes: 20e6, mediaTypes: ['image/jpeg', 'image/png', 'image/webp', 'image/gif'] }, tools: { maxCount: 8 } });
+  return Object.freeze(sample);
 }
 
 // The room, as room.d.ts has it, only as far as the app uses it: presence,

@@ -214,7 +214,7 @@ test('MCP: one address per unit', async () => {
   assert.equal(init.serverInfo.name, '3d-living-space');
   assert.match(init.instructions, /This connection belongs to one unit/);
   const tools = (await rpc('tools/list')).tools;
-  for (const t of ['get_unit', 'build_unit', 'edit_unit', 'get_catalog', 'set_info', 'place_items', 'update_items', 'remove_items', 'create_asset', 'find_spots', 'check_unit', 'render_plan']) {
+  for (const t of ['get_unit', 'build_unit', 'edit_unit', 'get_catalog', 'set_info', 'place_items', 'update_items', 'remove_items', 'create_asset', 'create_texture', 'find_spots', 'check_unit', 'render_plan']) {
     const tool = tools.find((x) => x.name === t);
     assert.ok(tool, t);
     assert.equal(tool.inputSchema.properties?.unit, undefined, `${t} takes no unit`);

@@ -905,6 +905,67 @@ h1 a:hover { color: var(--accent-text); }
   .mode svg { display: none; }
   .cta { grid-template-columns: 1fr; }
 }
+
+/* ---------- Materials, textures and moving pieces on phones ---------- */
+.pe-material { display: flex; align-items: baseline; gap: 8px; margin: 2px 0 10px; font-size: 14px; }
+.pe-material span { font: 500 12px/1.1 var(--font-ui); color: var(--ink-2); }
+.pe-material b { font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.materials { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 14px; }
+.material {
+  width: 36px; height: 36px; border-radius: var(--r-s); border: 0; cursor: pointer; padding: 0;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ink) 14%, transparent);
+}
+/* Made for this unit (create_texture, or matched from a photo). */
+.material.made { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ink) 14%, transparent), 0 0 0 1.5px var(--surface), 0 0 0 3px color-mix(in srgb, var(--accent) 45%, transparent); }
+.material[aria-pressed="true"] { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* Under the lights button: a glass capsule that says Move, blue while on. */
+.move-btn {
+  right: 16px; top: calc(max(16px, var(--safe-t)) + 156px); width: auto; min-width: 44px; padding: 0 14px 0 12px;
+  border-radius: 999px; display: flex; gap: 6px; font: 600 14px/1 var(--font-ui);
+}
+.move-btn svg { width: 18px; height: 18px; flex: none; }
+.move-btn .move-label { white-space: nowrap; }
+.move-btn[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); }
+.stage.empty .move-btn, .stage.measuring .move-btn, .stage.previewing .move-btn { display: none; }
+@media (max-width: 899px) and (orientation: portrait), (max-width: 899px) and (min-height: 560px) {
+  .move-btn { right: 12px; top: calc(max(12px, var(--safe-t)) + 156px); height: 42px; }
+  .stage.can-move .minimap { top: calc(max(12px, var(--safe-t)) + 212px); }
+}
+@media (orientation: landscape) and (max-height: 559px) {
+  .move-btn { right: max(12px, env(safe-area-inset-right, 0px)); top: calc(max(10px, var(--safe-t)) + 150px); height: 42px; }
+}
+
+/* Match a photo: a card over everything, the photo with its box, the result beside the photo. */
+.match {
+  position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; padding: max(16px, var(--safe-t)) 16px max(16px, var(--safe-b));
+  background: rgba(0, 0, 0, 0.32); overflow-y: auto;
+  -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+}
+.match:focus { outline: none; }
+.match-card { width: min(520px, 100%); max-height: 100%; overflow-y: auto; padding: 24px 24px 20px; }
+.match-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.match-head h2 { margin: 0; font: 700 24px/1.15 var(--font-display); letter-spacing: -0.01em; }
+.match-lede { margin: 8px 0 16px; color: var(--ink-2); font-size: 14px; }
+.match-pick { display: grid; place-items: center; padding: 28px 0; margin: 0 0 14px; border-radius: var(--r-l); background: var(--fill); }
+.match-crop { position: relative; margin: 0 0 8px; border-radius: var(--r-m); overflow: hidden; touch-action: none; cursor: crosshair; line-height: 0; background: var(--fill); text-align: center; }
+.match-crop canvas { max-width: 100%; max-height: min(300px, 38dvh); width: auto; height: auto; display: inline-block; }
+.match-box { position: absolute; border: 2px solid #fff; border-radius: 6px; box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(0, 0, 0, 0.3) inset; pointer-events: none; }
+.match-note { margin: 0 0 14px; font-size: 13px; color: var(--ink-2); }
+.match-link { appearance: none; border: 0; background: none; padding: 0; font: inherit; color: var(--link); cursor: pointer; }
+.match-card .field { margin-bottom: 12px; }
+.match-select { font: 400 15px/1.2 var(--font-ui); color: var(--ink); background: var(--surface-2); border: 1px solid var(--rule); border-radius: var(--r-s); padding: 9px 10px; width: 100%; }
+.match-result { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 4px 0 8px; }
+.match-result figure { margin: 0; }
+.match-result canvas { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; border-radius: var(--r-m); background: var(--fill); box-shadow: 0 0 0 0.5px var(--rule-2); }
+.match-result figcaption { margin-top: 6px; font-size: 12.5px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.match-name { margin: 0; font-weight: 600; font-size: 15px; }
+.match-name:empty { display: none; }
+@media (max-width: 899px) and (orientation: portrait), (max-width: 899px) and (min-height: 560px) {
+  .match { place-items: end center; padding: 0; }
+  .match-card { width: 100%; border-radius: var(--r-xl) var(--r-xl) 0 0; padding-bottom: calc(20px + var(--safe-b)); max-height: 92dvh; }
+  .match-card input, .match-select { font-size: 16px; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }
 }
@@ -989,6 +1050,12 @@ h1 a:hover { color: var(--accent-text); }
           </div>
           <ul class="rooms" id="roomList"></ul>
           <p class="section-note" id="roomsNote"></p>
+          <!-- As an Artifact, for editors: a finish matched to a photo (src/match.js). -->
+          <div class="group" id="matchGroup" data-artifact hidden>
+            <h2>Match your finishes</h2>
+            <p class="section-note flush">Photograph your real floor, counter, cabinets or tile. Claude designs a texture that matches it, and the unit uses it.</p>
+            <div class="btn-row"><button class="btn" data-match="floor">Match a photo</button></div>
+          </div>
         </section>
         <section id="tab-furniture" role="tabpanel" aria-labelledby="t-furniture" hidden>
           <!-- Suggestions (src/suggestions.js): the ones waiting for this unit,
@@ -1046,8 +1113,11 @@ h1 a:hover { color: var(--accent-text); }
               <button class="btn" id="peFloor">Put on floor</button>
             </div>
             <p class="pe-warn" id="peWarn" role="status" hidden></p>
+            <p class="pe-material"><span>Material</span><b id="peMaterialName"></b></p>
+            <div class="materials" id="peMaterials" role="group" aria-label="Material"></div>
             <div class="swatches" id="peSwatches" role="group" aria-label="Color"></div>
             <div class="btn-row">
+              <button class="btn" id="peMatch" data-artifact hidden title="Make a texture from a photo of the real thing, with Claude">Match a photo</button>
               <button class="btn" id="peDup">Duplicate</button>
               <button class="btn" id="peAsk" data-artifact hidden title="Hand this piece to Claude in your conversation beside this page">Ask Claude</button>
               <button class="btn" id="peDel">Delete</button>
@@ -1225,6 +1295,11 @@ h1 a:hover { color: var(--accent-text); }
       <svg class="i-sun" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="10" cy="10" r="3.4"/><path d="M10 2v2.2M10 15.8V18M2 10h2.2M15.8 10H18M4.3 4.3l1.6 1.6M14.1 14.1l1.6 1.6M4.3 15.7l1.6-1.6M14.1 5.9l1.6-1.6"/></svg>
       <svg class="i-moon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M16 12.4A6.5 6.5 0 0 1 7.6 4a6.5 6.5 0 1 0 8.4 8.4z"/></svg>
     </button>
+    <!-- Phones: whether a drag on a piece moves it (src/layout.js movable). -->
+    <button class="icon-btn move-btn" id="moveBtn" aria-label="Move furniture" aria-pressed="false" title="Move furniture" hidden>
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 2.5v15M2.5 10h15M10 2.5 7.8 4.7M10 2.5l2.2 2.2M10 17.5l-2.2-2.2M10 17.5l2.2-2.2M2.5 10l2.2-2.2M2.5 10l2.2 2.2M17.5 10l-2.2-2.2M17.5 10l-2.2 2.2"/></svg>
+      <span class="move-label">Move</span>
+    </button>
     <div class="lights-pop" id="lightsPop" role="dialog" aria-label="Lights and time of day" hidden>
       <div class="lp-head">
         <span class="lp-title">Time of day</span>
@@ -1337,12 +1412,42 @@ h1 a:hover { color: var(--accent-text); }
       <p class="pb-warn" id="pbWarn" role="status" hidden></p>
     </div>
     <div class="toast" id="toast" role="status" hidden></div>
+    </div>
     <canvas class="minimap" id="minimap" hidden aria-label="Mini map. Tap to move there."></canvas>
     <div class="joystick" id="joystick" hidden aria-hidden="true"><div class="knob"></div></div>
     <div class="scalebar" id="scalebar" hidden><span></span><b></b></div>
     <div class="loading" id="loading">Building the unit…</div>
   </main>
 </div>
+<!-- Match a photo (src/match.js): as an Artifact, with the viewer's own Claude. -->
+<div class="match" id="matchDialog" role="dialog" aria-modal="true" aria-labelledby="matchTitle" tabindex="-1" hidden>
+  <div class="card match-card">
+    <div class="match-head">
+      <h2 id="matchTitle">Match a photo</h2>
+      <button class="lp-x" id="matchClose" aria-label="Close"><svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 3l8 8M11 3l-8 8"/></svg></button>
+    </div>
+    <p class="match-lede">Choose a photo of the real surface. Claude designs a texture to match it. The photo goes to Claude on your account and isn't saved here.</p>
+    <div class="match-pick" id="matchPick">
+      <label class="btn primary big" for="matchFile">Choose a photo</label>
+    </div>
+    <input type="file" id="matchFile" accept="image/*" hidden>
+    <div class="match-crop" id="matchCrop" hidden><canvas id="matchPhoto"></canvas><div class="match-box" id="matchBox"></div></div>
+    <p class="match-note" id="matchCropNote" hidden>Drag a box around the surface, as close and square-on as you can. <button class="match-link" id="matchChange" type="button">Another photo</button></p>
+    <label class="field wide"><span>Use it for</span><select id="matchTarget" class="match-select"></select></label>
+    <label class="field wide"><span>What is it? (optional)</span><input id="matchNote" type="text" maxlength="200" autocomplete="off" placeholder="e.g. white oak herringbone, 3 in planks"></label>
+    <div class="match-result" id="matchResult" hidden>
+      <figure><canvas id="matchSample"></canvas><figcaption>Photo</figcaption></figure>
+      <figure><canvas id="matchTexture"></canvas><figcaption id="matchScore">Texture</figcaption></figure>
+    </div>
+    <p class="match-name" id="matchName"></p>
+    <p class="status" id="matchStatus" role="status"></p>
+    <div class="btn-row">
+      <button class="btn primary" id="matchGo" disabled>Match it</button>
+      <button class="btn primary" id="matchUse" hidden>Use it</button>
+      <button class="btn" id="matchAgain" hidden>Try again</button>
+      <button class="btn" id="matchStop" hidden>Stop</button>
+    </div>
+  </div>
 <!-- If any part of the app can't load (a blocker stopping a file, a dropped
      connection), say so instead of building forever. -->
 <script>

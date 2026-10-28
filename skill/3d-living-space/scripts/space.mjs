@@ -36,7 +36,7 @@ const COMMANDS = {
   doctor: { usage: 'doctor', about: 'Check Node, where the scripts run from, and that the plan renderer and its fonts load.', flags: [] },
 };
 const BOOLEAN = new Set(['example', 'force', 'markdown', 'snapshot-only', 'single']);
-const TOOL_FLAGS = { render_plan: ['out', 'overlay', 'overlay-scale', 'overlay-origin'] };
+const TOOL_FLAGS = { render_plan: ['out', 'overlay', 'overlay-scale', 'overlay-origin'], create_texture: ['out', 'sample', 'crop'] };
 
 class Usage extends ToolError {}
 
@@ -116,19 +116,43 @@ function overlayOf(flags, io) {
   return { href: `data:${img.type};base64,${buf.toString('base64')}`, x0, z0, x1: x0 + ft(w), z1: z0 + ft(h) };
 }
 
+// create_texture --sample: the part of the person's photo showing the real
+// surface (--crop x,y,w,h in pixels, or as fractions of the photo), read
+// square through the renderer, to measure and show beside the texture.
+function sampleOf(flags, io, r) {
+  if (!flags.sample) return undefined;
+  const buf = readFileSync(resolve(io.cwd, flags.sample));
+  const img = imageSize(buf);
+  if (!img) throw new Usage('--sample takes a PNG or JPEG photo (convert others first, e.g. sips -s format jpeg photo.heic --out photo.jpg).');
+  const [w, h] = img.size;
+  let crop = [0, 0, w, h];
+  if (flags.crop) {
+    const v = String(flags.crop).split(/[\s,]+/).filter(Boolean).map(Number);
+    if (v.length !== 4 || !v.every(Number.isFinite) || v[2] <= 0 || v[3] <= 0) throw new Usage('--crop takes x,y,width,height: pixels on the photo, or fractions of it (0.2,0.5,0.3,0.3).');
+    crop = v.every((x) => x <= 1) ? [v[0] * w, v[1] * h, v[2] * w, v[3] * h] : v;
+  }
+  const S = 220;
+  const p = r.pixels(`<svg xmlns="http://www.w3.org/2000/svg" width="${S}" height="${S}" viewBox="${crop.join(' ')}" preserveAspectRatio="xMidYMid slice"><image href="data:${img.type};base64,${buf.toString('base64')}" width="${w}" height="${h}"/></svg>`);
+  return { rgba: p.rgba, w: p.w, h: p.h, href: `data:image/png;base64,${Buffer.from(p.png).toString('base64')}` };
+}
+
 async function runTool(tool, positional, flags, work, io) {
   const parsed = z.object(tool.inputSchema).safeParse(await readArgs(positional[1], io));
   if (!parsed.success) throw new Usage(issuesOf(tool.name, parsed.error));
-  let png = null;
-  if (tool.name === 'render_plan') { const r = await raster(); await r.ready(); png = r.png; }
-  const extra = tool.name === 'render_plan' ? { overlay: overlayOf(flags, io) } : undefined;
+  const pictures = tool.name === 'render_plan' || tool.name === 'create_texture';
+  let png = null, r = null;
+  if (pictures) { r = await raster(); await r.ready(); png = r.png; }
+  const extra = tool.name === 'render_plan' ? { overlay: overlayOf(flags, io) }
+    : tool.name === 'create_texture' ? { sample: sampleOf(flags, io, r) } : undefined;
   const out = createTools(toolContext(work, { png }))[tool.name](parsed.data, extra);
   if (!out?.image) return pretty(out);
-  const file = resolve(io.cwd, flags.out ?? work.path('plan.png'));
+  const id = tool.name === 'create_texture' ? /"texture_id": "([^"]+)"/.exec(out.text)?.[1] ?? 'texture' : null;
+  const file = resolve(io.cwd, flags.out ?? work.path(id ? `texture-${id}.png` : 'plan.png'));
   mkdirSync(dirname(file), { recursive: true });
   writeFileSync(file, out.image);
   const buf = Buffer.from(out.image);
   const [w, h] = pngSize(buf);
+  if (id) return `${out.text}\nPreview: ${file} (${w} × ${h} px, PNG)${extra.sample ? ', with the photo beside it' : ''}. Open it and compare it with the photo.`;
   return `${out.text}\nPlan: ${file} (${w} × ${h} px, PNG)${extra.overlay ? ', with the floor plan laid over it' : ''}. Open it and compare it with the floor plan.`;
 }
 

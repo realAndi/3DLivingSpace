@@ -158,6 +158,8 @@ export async function startHarness({ root = REPO, port = 8791, host = '127.0.0.1
       searchable: atLeast(who.level, 'interact') && !who.outside,
       // room.canSendToClaudeSession(): &ask=available|no_session|off (default available).
       ask: p.get('ask') ?? 'available',
+      // use("sample"): &sample=on (default: a scripted Claude, see client.mjs) | off.
+      sample: p.get('sample') !== 'off' && signedIn,
       genericAvatar: GENERIC_AVATAR, neutralColor: NEUTRAL,
     };
   }
@@ -170,7 +172,7 @@ export async function startHarness({ root = REPO, port = 8791, host = '127.0.0.1
 const config = ${data};
 window.__mock = { role: config.role, level: config.level, uid: config.uid, log: [] };
 if (config.nocap) return;
-const served = { db: config.level !== 'none', user: true, room: config.level !== 'none' && !config.outside };
+const served = { db: config.level !== 'none', user: true, room: config.level !== 'none' && !config.outside, sample: !!config.sample };
 const memo = {};
 let mod;
 const after = (ms) => new Promise((r) => setTimeout(r, ms));

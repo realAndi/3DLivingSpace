@@ -29,7 +29,8 @@ import { fmtLen, fmtDims, fmtArea } from './units.js';
 // window.LIVING_SPACE): there the unit lives in the Artifact's own database,
 // through src/claude-store.js, and the people looking at it at the same time
 // see each other (src/together.js): both loaded only then, and starting now.
-const inClaude = window.LIVING_SPACE === 'artifact' ? Promise.all([import('./claude-store.js'), import('./together.js')]) : null;
+// Matching a texture to a photo with the viewer's own Claude (src/match.js) is the Artifact's too.
+const inClaude = window.LIVING_SPACE === 'artifact' ? Promise.all([import('./claude-store.js'), import('./together.js'), import('./match.js')]) : null;
 
 const DEG = Math.PI / 180;
 const EYE = 5.2;
@@ -467,7 +468,8 @@ const layout = new LayoutEditor({
   clipping: () => renderer.clippingPlanes,
   onSelect: (id) => { stage.classList.toggle('piece-active', id != null); if (id != null) dismissHint(); },
   onOps: (ops) => session.queue(ops),
-  onAdded: () => { if (narrow()) setSheet(false); },
+  // A piece just added is meant to be dragged into place.
+  onAdded: () => { if (narrow()) setSheet(false); if (coarse && !moving) setMoving(true, { say: true }); },
   // Lamps light the room when on (src/lighting.js), and pieces you can switch
   // or open (lamps, TVs, curtains, fans) join the things you can use.
   onMount: (item, g) => { if (actOf(item, layout.assets) === 'light') lighting.addLamp(item.uid, g); things.addPiece(item, g); },
@@ -645,6 +647,7 @@ function showUnit(spec, { fresh = false } = {}) {
   measureUnit();
   lighting.setUnit(U);
   layout.setUnit(U);
+  renderMoveBtn();
   tape.setUnit(U);
   things.setUnit(U, { doors, movers: fixtures?.movers ?? [] });
   things.connectLighting(lighting);
@@ -676,7 +679,7 @@ function showUnit(spec, { fresh = false } = {}) {
 // Units on the server (or in an Artifact's database): opening, saving,
 // sharing, view-only, your own version
 let loadedHome = false;
-const [store, others] = inClaude ? await inClaude : [];
+const [store, others, matching] = inClaude ? await inClaude : [];
 const Session = store ? store.ArtifactSession : UnitSession;
 const session = new Session({
   onLoad: (doc, ss) => {
@@ -687,6 +690,7 @@ const session = new Session({
     if (shownSpec !== was) tape.clear();
     renderTapeUI();
     layout.load(doc ?? { items: [], assets: [] }, { readOnly: ss.role !== 'owner' });
+    renderMoveBtn();
     renderSession(ss);
     if (ss.role === 'home') setSheet(narrow());
     else if (narrow()) setSheet(false);
@@ -716,6 +720,10 @@ if (together) {
   const use = (name) => { try { return Promise.resolve(window.claude?.use?.(name) ?? null).catch(() => null); } catch { return Promise.resolve(null); } };
   Promise.all([use('room'), use('user')]).then(([room, user]) => together.connect(room, user)).then(() => { $('#peAsk').hidden = !together.canAsk; });
 }
+
+// Match a photo: the viewer's Claude designs a texture from it, for editors.
+const match = matching?.createMatch({ session, layout, getU: () => U, toast: (t) => layout.toast(t) }) ?? null;
+match?.connect();
 
 // The selected piece, handed to the viewer's Claude as data it can act on with
 // the skill's tools: inches, as they are. Called straight from the click.
@@ -789,6 +797,7 @@ let codeFor = null;  // the unit whose edit code state the Share tab shows
 function renderSession(ss) {
   const role = ss.role, home = role === 'home', mine = role === 'owner', visitor = role === 'viewer';
   document.body.dataset.role = role;
+  match?.refresh();
   $('#welcome').hidden = !home;
   $('#unitView').hidden = home;
   panel.classList.toggle('welcome-mode', home);
@@ -1338,8 +1347,33 @@ $('#optFurniture').addEventListener('change', (e) => {
   furniture.visible = e.target.checked && !suggest.active;
   suggest.root.visible = e.target.checked;
   layout.select(null);
+  renderMoveBtn();
   invalidate();
 });
+
+// Phones and tablets: a drag on a piece moves it only while Move is on, so
+// turning the view or looking around never shoves the sofa. A tap still
+// selects it. Off at first; remembered in this browser.
+const MOVE_KEY = 'livingspace.move.v1';
+let moving = false;
+try { moving = localStorage.getItem(MOVE_KEY) === '1'; } catch { /* storage off */ }
+layout.movable = !coarse || moving;
+function setMoving(on, { say = false } = {}) {
+  moving = !!on;
+  try { localStorage.setItem(MOVE_KEY, moving ? '1' : '0'); } catch { /* storage off */ }
+  layout.movable = !coarse || moving;
+  renderMoveBtn();
+  if (say) layout.toast(moving ? 'Move is on: drag a piece to move it.' : 'Move is off: drags turn the view, taps select.');
+}
+function renderMoveBtn() {
+  const btn = $('#moveBtn');
+  const show = coarse && !layout.readOnly && !U.empty && $('#optFurniture').checked;
+  btn.hidden = !show;
+  btn.setAttribute('aria-pressed', String(moving));
+  btn.title = moving ? 'Move is on: drag pieces to move them' : 'Move furniture';
+  stage.classList.toggle('can-move', show);
+}
+$('#moveBtn').addEventListener('click', () => setMoving(!moving, { say: true }));
 $('#optLabels').addEventListener('change', (e) => { showLabels = e.target.checked; invalidate(); });
 $('#optCutaway').addEventListener('change', (e) => {
   cutaway = e.target.checked;

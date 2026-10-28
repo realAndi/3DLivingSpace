@@ -15,7 +15,17 @@ const C = {
   bg: '#ebe8e3', paper: '#f6f4f0', wall: '#3d3b38', halfWall: '#8a857d', window: '#a9c7d1', glass: '#5d8796',
   fixture: '#d6d0c6', fixtureLine: '#a39b8f', upper: '#8f877b', swing: '#8f897f', ink: '#1c1b19', ink2: '#625e57', oak: '#a87a43', grid: '#ddd7cd',
 };
-const FLOOR = { wood: '#e2d4bf', 'wood-dark': '#cfb898', tile: '#e2e4e3', stone: '#d9d4cb', carpet: '#e6dfd2', concrete: '#d6d4d0', deck: '#d3c2a4' };
+const FLOOR = {
+  wood: '#e2d4bf', 'wood-dark': '#cfb898', herringbone: '#dcc8aa', chevron: '#dcc8aa', tile: '#e2e4e3', 'hex-tile': '#e9e8e5', checker: '#cfcfcc',
+  stone: '#d9d4cb', slate: '#b9bcb8', travertine: '#e4d8c3', marble: '#ecebe8', terrazzo: '#e6e1d8', carpet: '#e6dfd2', concrete: '#d6d4d0', deck: '#d3c2a4',
+};
+// A floor's tint on the plan; one of the unit's textures shows its base, lightened.
+const floorFill = (floor, U) => {
+  const t = /^tex:/.test(floor ?? '') ? U.textureById?.[floor.slice(4)] : null;
+  if (!t) return FLOOR[floor] ?? FLOOR.wood;
+  const c = [1, 3, 5].map((i) => Math.round(parseInt(t.base.slice(i, i + 2), 16) * 0.45 + 255 * 0.55));
+  return `rgb(${c.join(',')})`;
+};
 const TYPE_FILL = {
   sofa: '#9d978f', sectional: '#9d978f', armchair: '#7a756f', ottoman: '#a39d95', bed: '#efe9df', rug: '#dcd2c2',
   coffeetable: '#8a6a4f', sidetable: '#8a6a4f', tvstand: '#7b5a3e', bookshelf: '#7b5a3e', table: '#8a6a4f', roundtable: '#8a6a4f',
@@ -113,11 +123,11 @@ function planGroup(doc, U, [bx, by, bw, bh], { detail = false } = {}) {
   }
 
   // Floors, then the floor under doorways so they read as passages.
-  for (const r of U.rooms) out.push(`<polygon points="${pts(r.poly)}" fill="${FLOOR[r.floor] ?? FLOOR.wood}"/>`);
+  for (const r of U.rooms) out.push(`<polygon points="${pts(r.poly)}" fill="${floorFill(r.floor, U)}"/>`);
   for (const o of U.openings) {
     if (o.kind === 'window') continue;
     const r = U.roomById[o.rooms[0]];
-    out.push(`<polygon points="${pts(o.poly)}" fill="${FLOOR[r?.floor] ?? FLOOR.wood}"/>`);
+    out.push(`<polygon points="${pts(o.poly)}" fill="${floorFill(r?.floor, U)}"/>`);
   }
 
   // Fixtures: light footprints with a darker front edge; kitchen parts ticked.
@@ -355,4 +365,31 @@ function wrap(str, width) {
   }
   if (line) lines.push(line);
   return lines;
+}
+
+// A texture's preview (create_texture): the surface at its real scale, a
+// close-up, and the person's photo beside them when there is one. Pictures
+// come as PNG data URLs: { href, inches } for wide and close, { href } for the photo.
+export function textureSvg({ name, wide, close, photo = null }) {
+  const W = photo ? 980 : 700, H = 498, pad = 20, big = 420, small = 220;
+  const out = [`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">`, `<rect width="${W}" height="${H}" fill="${C.paper}"/>`];
+  out.push(text(pad, 30, name, { size: 17, bold: true }));
+  const panel = (x, y, size, href, label) => {
+    out.push(`<image href="${href}" x="${x}" y="${y}" width="${size}" height="${size}" preserveAspectRatio="none"/>`);
+    out.push(`<rect x="${x + 0.5}" y="${y + 0.5}" width="${size - 1}" height="${size - 1}" fill="none" stroke="${C.fixtureLine}"/>`);
+    out.push(text(x, y + size + 18, label, { size: 12, fill: C.ink2 }));
+  };
+  const fmt = (v) => `${Math.round(v * 10) / 10}`;
+  panel(pad, 48, big, wide.href, `${fmt(wide.inches)} in across, as it lies`);
+  panel(pad + big + 20, 48, small, close.href, `Close up: ${fmt(close.inches)} in across`);
+  if (photo) panel(pad + big + small + 40, 48, small, photo.href, 'The photo');
+  // A one-foot scale bar under the wide view.
+  const foot = (12 / wide.inches) * big;
+  if (foot < big) {
+    const y = 48 + big - 14;
+    out.push(`<rect x="${pad + 10}" y="${y - 6}" width="${f1(foot)}" height="6" fill="${C.paper}" stroke="${C.ink}" stroke-width="1"/>`);
+    out.push(text(pad + 10, y - 10, '1 ft', { size: 11, bold: true, halo: C.paper }));
+  }
+  out.push('</svg>');
+  return out.join('');
 }

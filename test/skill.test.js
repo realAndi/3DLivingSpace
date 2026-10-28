@@ -12,6 +12,8 @@ import { fileURLToPath } from 'node:url';
 import { run } from '../skill/3d-living-space/scripts/space.mjs';
 import { parseVersions } from '../skill/3d-living-space/scripts/artifact.mjs';
 import { moduleGraph } from '../skill/3d-living-space/scripts/app.mjs';
+import { patch, preset } from '../src/recipes.js';
+import { encodePng } from '../src/png.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const scratch = mkdtempSync(join(tmpdir(), '3dls-skill-'));
@@ -139,6 +141,46 @@ test('skill: the tools from the command line answer as the MCP server does', asy
   assert.match(await w.ok(['render_plan', '--out', 'pics/p.png']), /pics\/p\.png/);
   assert.ok(existsSync(join(w.dir, 'pics/p.png')));
 
+  // A texture to match a photo: made, used, the same reply and picture from
+  // both; with --sample, measured against the photo and shown beside it.
+  const tex = { name: 'Oak herringbone', for: 'floor', base: '#b48a5c', pattern: { type: 'herringbone', size: [3, 18], colors: ['#b48a5c', '#a87e52'] },
+    layers: [{ type: 'grain', color: '#7d5a37', amount: 0.45, scale: 0.2 }], apply_to: { rooms: ['living'], pieces: ['sofa'], finishes: ['counters'] } };
+  const viaCli = await w.cli(['create_texture', JSON.stringify(tex)]);
+  assert.equal(viaCli.code, 0, viaCli.err);
+  const viaMcp = await mcp('create_texture', tex);
+  assert.equal(viaMcp.isError, false, viaMcp.text);
+  const [made, preview] = viaCli.out.split('\nPreview: ');
+  assert.deepEqual(same(JSON.parse(made)), same(viaMcp.data));
+  assert.deepEqual(JSON.parse(made).applied_to, ['finishes.counters', 'room living', 'piece sofa']);
+  const texFile = /^(\S+\.png)/.exec(preview)[1];
+  assert.equal(texFile, join(w.ws, 'texture-oak-herringbone.png'));
+  assert.deepEqual(readFileSync(texFile), viaMcp.image);
+  const spec = w.stored().unit;
+  assert.equal(spec.rooms.find((r) => r.id === 'living').floor, 'tex:oak-herringbone');
+  assert.equal(spec.finishes.counters, 'tex:oak-herringbone');
+  assert.equal(w.stored().items.find((i) => i.uid === 'sofa').material, 'tex:oak-herringbone');
+  const listed = (await both('get_unit')).textures;
+  assert.deepEqual(listed.map((t) => [t.texture_id, t.used_by]), [['oak-herringbone', ['finishes.counters', 'room living', 'piece sofa']]]);
+  // Changed in place by its id; a photo to measure against.
+  writeFileSync(join(w.dir, 'photo.png'), encodePng(patch(preset('chevron'), { px: 64 }).rgba, 64, 64));
+  const again = await w.cli(['create_texture', JSON.stringify({ ...tex, texture_id: 'oak-herringbone', base: '#a07a50', apply_to: undefined }), '--sample', 'photo.png', '--crop', '0,0,1,1']);
+  assert.equal(again.code, 0, again.err);
+  const vs = JSON.parse(again.out.split('\nPreview: ')[0]);
+  assert.equal(vs.texture_id, 'oak-herringbone');
+  assert.ok(vs.against_the_photo.match >= 0 && vs.against_the_photo.hints.length, JSON.stringify(vs));
+  assert.match(again.out, /with the photo beside it/);
+  assert.equal(w.stored().unit.textures.length, 1);
+  await mcp('create_texture', { ...tex, texture_id: 'oak-herringbone', base: '#a07a50', apply_to: undefined });
+  assert.match((await w.cli(['create_texture', JSON.stringify({ ...tex, texture_id: 'nope' })])).err, /no texture "nope"/);
+  // A piece's material; a texture removed leaves what used it as it was.
+  await both('update_items', { items: [{ id: 'side-1', material: 'travertine' }] });
+  const removed = await both('edit_unit', { remove: ['oak-herringbone'] });
+  assert.deepEqual(removed.removed, ['texture oak-herringbone']);
+  assert.equal(w.stored().unit.finishes.counters, 'quartz');
+  assert.equal(w.stored().unit.rooms.find((r) => r.id === 'living').floor, null);
+  assert.equal(w.stored().items.find((i) => i.uid === 'sofa').material, undefined);
+  assert.equal(w.stored().items.find((i) => i.uid === 'side-1').material, 'travertine');
+
   // What can't be done says why, as the server does.
   const err = async (name, args) => {
     const r = await w.cli([name, JSON.stringify(args)]);
@@ -205,7 +247,7 @@ test('skill: bundle, push and pull keep the Artifact\'s files and database in st
   assert.deepEqual(b.publish.capabilities, { db: { rules: [
     { path: '', read: 'view', write: 'admin' }, { path: 'data/users/{self}', write: 'interact' },
     { path: 'suggestions', read: 'admin', write: 'admin' }, { path: 'suggestions/{self}', read: 'interact', write: 'interact' },
-  ] }, user: { scopes: ['profile'] }, room: {} });
+  ] }, user: { scopes: ['profile'] }, room: {}, sample: { images: true } });
   assert.match(b.publish.description, /^A to-scale 3D model of a studio, 1 bath apartment/);
   const page = readFileSync(b.publish.file_path, 'utf8');
   assert.doesNotMatch(page, /<!doctype|<html[\s>]|<head>|<body[\s>]/i, 'body only');

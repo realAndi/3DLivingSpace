@@ -28,7 +28,8 @@
 // suggestion when the database takes that. Without a database (signed out, or
 // a host that never answers) the snapshot is all there is.
 
-import { emptyUnit } from './unit.js';
+import { emptyUnit, cleanUnit } from './unit.js';
+import { cleanTexture, TEXTURE_LIMITS } from './recipes.js';
 import { cleanAsset, cleanItem, cleanDesign, LIMITS } from './design.js';
 import { layoutChanges, applyChanges } from './changes.js';
 
@@ -416,6 +417,29 @@ export class ArtifactSession {
     if (author !== undefined) this.author = author;
     this.pending.info = { title: this.title, author: this.author };
     this.#schedule();
+  }
+
+  // Can this viewer add a texture to the unit (src/match.js)? Editors, in
+  // the unit everyone sees.
+  get canMakeTextures() { return this.#editor() && this.showing === 'shared'; }
+
+  // A texture made on this page, into the unit, and where to use it: unit
+  // finishes ('floor', 'counters'…) and rooms' floors. Claude's next pull
+  // takes it like any change to unit/spec. Returns the texture as saved.
+  async saveTexture(raw, { finishes = [], rooms = [] } = {}) {
+    if (!this.canMakeTextures) throw new Error('Only editors can add textures.');
+    const s = this.shared, spec = structuredClone(s.unit);
+    const others = (spec.textures ?? []).filter((t) => t.id !== raw.id);
+    if (others.length >= TEXTURE_LIMITS.textures) throw new Error(`This unit already has ${TEXTURE_LIMITS.textures} textures, as many as it holds.`);
+    const texture = cleanTexture(raw, new Set(others.map((t) => t.id)));
+    if (!texture) throw new Error('That texture couldn\'t be used.');
+    spec.textures = [...others, texture];
+    const ref = `tex:${texture.id}`;
+    for (const k of finishes) spec.finishes[k] = ref;
+    for (const id of rooms) { const r = spec.rooms.find((x) => x.id === id); if (r) r.floor = ref; }
+    const { unit } = cleanUnit(spec);
+    await this.#put('unit/spec', { unit, unitRev: (s.rev ?? 1) + 1, savedAt: Date.now() });
+    return texture;
   }
 
   #schedule() {

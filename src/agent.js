@@ -8,11 +8,12 @@
 //                   unit, items, assets }, maybe more than once; it's saved checked
 //   built(row)    → the unit as built
 //   viewUrl       → where to look at it in 3D, or null
-//   png(svg)      → the plan as a PNG; beforeRender() runs first, if given
+//   png(svg)      → the plan or a texture's preview as a PNG; beforeRender()
+//                   runs first, if given
 // Inches at this edge, feet inside (src/unit.js fromInches / toInches). A tool
 // that can't do what it was asked throws ToolError, whose message says why and
 // what to do instead.
-import { CATALOG, catalogByType, SWATCHES, isFlat, placeOf } from './catalog.js';
+import { CATALOG, catalogByType, SWATCHES, MATERIALS, isFlat, placeOf } from './catalog.js';
 import { cleanAsset, cleanItem, randomId, LIMITS } from './design.js';
 import { holdsItems } from './parts.js';
 import { placeByType, restOn, hangOnWall, ceilingY, carry, descendants } from './stacking.js';
@@ -21,7 +22,9 @@ import {
   cleanUnit, buildUnit, fromInches, toInches, snapToWall,
 } from './unit.js';
 import { problems, clearances, findSpots, settleOffWalls, onFloor } from './fit.js';
-import { detailSvg } from './drawing.js';
+import { detailSvg, textureSvg } from './drawing.js';
+import { cleanTexture, patch, imageStats, compareStats, repeatOf, PRESETS, PATTERNS, LAYERS, TEXTURE_LIMITS } from './recipes.js';
+import { encodePng } from './png.js';
 
 export class ToolError extends Error {}
 
@@ -63,7 +66,7 @@ export function createTools({ current, write, built, viewUrl = null, png, before
   const itemOut = (U, assets = []) => (it) => ({
     id: it.uid, type: it.type === 'asset' ? `asset:${it.asset}` : it.type, name: it.name,
     at: [inch(it.x), inch(it.z)], width: inch(it.w), depth: inch(it.d), height: inch(it.h), rotation: it.rot,
-    color: it.color ?? undefined, room: U.roomAt(it.x, it.z)?.id ?? null,
+    color: it.color ?? undefined, material: it.material ?? undefined, room: U.roomAt(it.x, it.z)?.id ?? null,
     on: it.on ? it.on.replace(/^[pf]:/, '') : 'floor', ...(it.y ? { elevation: inch(it.y) } : {}),
     ...(placeOf(it, assets) !== 'floor' ? { placement: placeOf(it, assets) } : {}),
   });
@@ -81,6 +84,7 @@ export function createTools({ current, write, built, viewUrl = null, png, before
     for (const [from, to] of [['width', 'w'], ['depth', 'd'], ['height', 'h']]) if (spec[from] !== undefined) out[to] = ft(spec[from]);
     if (spec.rotation !== undefined) out.rot = spec.rotation;
     if (spec.color !== undefined) out.color = spec.color;
+    if (spec.material !== undefined) out.material = spec.material;
     if (spec.name !== undefined) out.name = spec.name;
     return out;
   }
@@ -162,6 +166,7 @@ export function createTools({ current, write, built, viewUrl = null, png, before
       labels: spec.labels.map(toInches.label),
       furniture: items.map(itemOut(U, row.doc.assets)),
       assets: row.doc.assets.map(assetOut),
+      textures: (spec.textures ?? []).map(textureOut(spec, items)),
       problems: [...U.problems, ...pieceProblems(U, row.doc)],
     };
   }
@@ -176,6 +181,19 @@ export function createTools({ current, write, built, viewUrl = null, png, before
       out.opens_into = b.swing > 0 ? b.rooms[1] ?? 'outside' : b.rooms[0];
     }
     return out;
+  }
+  // A texture, its recipe as given, and what uses it.
+  const textureOut = (spec, items) => ({ id, ...recipe }) => ({
+    texture_id: id, use_as: `tex:${id}`, ...recipe, repeat_inches: repeatOf({ id, ...recipe }),
+    used_by: usersOf(`tex:${id}`, spec, items),
+  });
+  function usersOf(ref, spec, items) {
+    return [
+      ...Object.entries(spec.finishes).filter(([, v]) => v === ref).map(([k]) => `finishes.${k}`),
+      ...spec.rooms.filter((r) => r.floor === ref).map((r) => `room ${r.id}`),
+      ...spec.fixtures.filter((f) => f.color === ref || f.opts?.backsplash === ref).map((f) => `fixture ${f.id}`),
+      ...items.filter((i) => i.material === ref).map((i) => `piece ${i.uid}`),
+    ];
   }
   const assetOut = (a) => ({ asset_id: a.id, name: a.name, description: a.description, placement: a.place ?? 'floor', kind: a.kind ?? 'furniture', width: a.w, depth: a.d, height: a.h, parts: a.parts.length, ...(a.light ? { light_at: a.light } : {}), place_as: `asset:${a.id}` });
 
@@ -209,6 +227,12 @@ export function createTools({ current, write, built, viewUrl = null, png, before
       } else {
         for (const rid of args.remove ?? []) {
           let hit = false;
+          if (spec.textures?.some((t) => t.id === rid)) {
+            spec.textures = spec.textures.filter((t) => t.id !== rid);
+            hit = true; report.removed.push(`texture ${rid}`);
+            // Pieces made of it go back to their own material.
+            for (const it of doc.items) if (it.material === `tex:${rid}`) delete it.material;
+          }
           for (const [list, one] of Object.entries(LISTS)) {
             const before = spec[list].length;
             spec[list] = spec[list].filter((x) => x.id !== rid);
@@ -298,7 +322,10 @@ export function createTools({ current, write, built, viewUrl = null, png, before
     })),
     placements: PLACEMENT_ABOUT,
     furniture_colors: SWATCHES.filter((s) => s.key).map((s) => s.key),
+    furniture_materials: MATERIALS.map((m) => ({ material: m.key, name: m.name, ...(m.tint ? { takes_color: true } : {}) })),
     custom_furniture: 'For anything else, build it with create_asset and place it as type "asset:<asset_id>".',
+    textures: `To match a real floor, counter, backsplash, cabinet, tile or fabric in the photos, make a texture with create_texture (patterns: ${PATTERNS.join(', ')}; layers: ${LAYERS.join(', ')}) and use it as "tex:<id>". Up to ${TEXTURE_LIMITS.textures} per unit.`,
+    texture_examples: Object.values(PRESETS),
   });
 
   function set_info({ title, author }) {
@@ -424,5 +451,62 @@ export function createTools({ current, write, built, viewUrl = null, png, before
     return { image, text };
   }
 
-  return { get_unit, build_unit, edit_unit, get_catalog, set_info, place_items, update_items, remove_items, create_asset, find_spots, check_unit, render_plan };
+  // A texture made or changed, used where apply_to says, and its preview:
+  // { image: PNG bytes, text }. sample (the skill's): the person's photo as
+  // { rgba, w, h, href }, compared with it and shown beside it.
+  function create_texture(args, { sample } = {}) {
+    beforeRender();
+    const { texture_id, apply_to, ...recipe } = args;
+    let made, report;
+    write((doc) => {
+      report = { dropped: [], applied: [], not_found: [] };
+      const spec = structuredClone(doc.unit);
+      const list = spec.textures ?? [];
+      if (texture_id && !list.some((t) => t.id === texture_id)) throw new ToolError(`This unit has no texture "${texture_id}" (get_unit lists them). Leave texture_id out to make a new one.`);
+      if (!texture_id && list.length >= TEXTURE_LIMITS.textures) throw new ToolError(`A unit holds at most ${TEXTURE_LIMITS.textures} textures. Change one with texture_id, or remove one with edit_unit.`);
+      const others = list.filter((t) => t.id !== texture_id);
+      const t = cleanTexture({ ...recipe, id: texture_id }, new Set(others.map((x) => x.id)), report.dropped);
+      spec.textures = texture_id ? list.map((x) => (x.id === texture_id ? t : x)) : [...list, t];
+      const ref = `tex:${t.id}`;
+      for (const k of apply_to?.finishes ?? []) { spec.finishes[k] = ref; report.applied.push(`finishes.${k}`); }
+      for (const id of apply_to?.rooms ?? []) {
+        const r = spec.rooms.find((x) => x.id === id);
+        if (r) { r.floor = ref; report.applied.push(`room ${id}`); } else report.not_found.push(`No room has the id "${id}".`);
+      }
+      for (const id of apply_to?.fixtures ?? []) {
+        const f = spec.fixtures.find((x) => x.id === id);
+        if (f) { f.color = ref; report.applied.push(`fixture ${id}`); } else report.not_found.push(`No fixture has the id "${id}".`);
+      }
+      for (const id of apply_to?.pieces ?? []) {
+        const it = doc.items.find((x) => x.uid === id);
+        if (it) { it.material = ref; report.applied.push(`piece ${id}`); } else report.not_found.push(`No piece has the id "${id}".`);
+      }
+      const { unit, dropped } = cleanUnit(spec);
+      report.dropped.push(...dropped);
+      doc.unit = unit;
+      made = unit.textures.find((x) => x.id === t.id);
+    });
+    // Wide enough to see the pattern repeat, close enough to see its detail.
+    const across = { floor: 60, counter: 36, tile: 36, cabinet: 30, wall: 60, wood: 30, stone: 36, fabric: 12, leather: 12, rug: 36, metal: 12, other: 30 }[made.for] ?? 30;
+    const wide = patch(made, { inches: across, px: 420 }), close = patch(made, { inches: across / 4, px: 220 });
+    const url = (p) => `data:image/png;base64,${encodePng(p.rgba, p.w, p.h).toString('base64')}`;
+    const stats = imageStats(wide.rgba, wide.w, wide.h);
+    const look = { mean: stats.mean, contrast: stats.contrast, palette: stats.palette.map(({ color, share }) => ({ color, share: Math.round(share * 100) / 100 })) };
+    const image = png(textureSvg({ name: made.name, wide: { href: url(wide), inches: across }, close: { href: url(close), inches: across / 4 }, photo: sample ? { href: sample.href } : null }));
+    const comparison = sample ? compareStats(imageStats(sample.rgba, sample.w, sample.h), stats) : null;
+    const text = pretty({
+      texture_id: made.id, use_as: `tex:${made.id}`, repeat_inches: repeatOf(made),
+      ...(report.applied.length ? { applied_to: report.applied } : {}),
+      ...(report.not_found.length ? { not_found: report.not_found } : {}),
+      ...(report.dropped.length ? { dropped: report.dropped } : {}),
+      ...(comparison ? { against_the_photo: comparison } : { as_drawn: look }),
+      next: comparison
+        ? 'Look at the picture beside the photo. Follow the hints, check the pattern\'s scale and shapes by eye, and call create_texture again with texture_id until it matches.'
+        : 'Compare the picture with the person\'s photo: colors, contrast, the size of planks or tiles, grain and veins. Call create_texture again with texture_id to adjust it. Use it as use_as in finishes, a room\'s floor, a fixture\'s color or a piece\'s material.',
+      ...(viewUrl ? { view_url: viewUrl } : {}),
+    });
+    return { image, text };
+  }
+
+  return { get_unit, build_unit, edit_unit, get_catalog, set_info, place_items, update_items, remove_items, create_asset, create_texture, find_spots, check_unit, render_plan };
 }

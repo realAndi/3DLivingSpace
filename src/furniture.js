@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { Batch, Frame, rng } from './kit.js';
-import { catalogByType, SWATCHES } from './catalog.js';
+import { catalogByType, SWATCHES, MATERIALS } from './catalog.js';
+import { textureMaterial, tinted } from './materials.js';
+import { isTexRef } from './recipes.js';
 import { plantLeafY, laptopLid, smallPlantLeaves, curtainFolds } from './parts.js';
 
 // 3D models for placed furniture: the catalog pieces, and custom assets built
@@ -13,7 +15,7 @@ import { plantLeafY, laptopLid, smallPlantLeaves, curtainFolds } from './parts.j
 // emitter for a lamp. What moves or lights up (a curtain panel, a microwave
 // door, fan blades, a shade, a screen) is its own child mesh, so setState only
 // moves it or changes one value on a material the piece has to itself.
-export { CATALOG, catalogByType, SWATCHES, isFlat, footprint, bounds, nearPiece } from './catalog.js';
+export { CATALOG, catalogByType, SWATCHES, MATERIALS, isFlat, footprint, bounds, nearPiece } from './catalog.js';
 
 const IN = 1 / 12, DEG = Math.PI / 180;
 
@@ -31,6 +33,22 @@ function swatchMaterial(M, key) {
 function swatchHex(key) {
   if (!key) return null;
   return SWATCHES.find((x) => x.key === key)?.hex ?? (/^#[0-9a-f]{6}$/.test(key) ? parseInt(key.slice(1), 16) : null);
+}
+
+// A piece's main material: what it's made of (`material`: a built-in one, or
+// one of the unit's textures), in its color where that material takes one;
+// else its color on the material it has by default, keeping an upholstered
+// piece's weave; else null, for the builder's own.
+const TINTS = new Set(MATERIALS.filter((m) => m.tint).map((m) => m.key));
+const WOVEN = { bed: 'headboard', sofa: 'fabric', sectional: 'fabric', ottoman: 'fabric', armchair: 'fabricDark', officechair: 'fabricDark', rug: 'rug' };
+function mainMaterial(M, item, build, textures) {
+  const hex = item.color && !['oak', 'walnut'].includes(item.color) ? swatchHex(item.color) : null;
+  if (item.material) {
+    const base = isTexRef(item.material) ? textureMaterial(M, textures, item.material) : M[item.material];
+    if (base) return hex != null && TINTS.has(item.material) ? tinted(base, hex) : base;
+  }
+  if (hex != null && WOVEN[build]) return tinted(M[WOVEN[build]], hex);
+  return swatchMaterial(M, item.color);
 }
 
 // Finishes only furniture uses, made on first use and kept per material set
@@ -71,7 +89,8 @@ function glow(X, key, hex, side = THREE.FrontSide) {
   return own(X, `${key}:${hex}`, () => std(hex, 0.9, { side, emissive: new THREE.Color(WARM).multiply(new THREE.Color(hex)), emissiveIntensity: 0 }));
 }
 
-// Materials for asset parts, one per color and finish.
+// Materials for asset parts, one per color and finish, or the part's
+// material (a built-in one, or one of the unit's textures).
 const FINISH = {
   matte: { roughness: 0.9 }, satin: { roughness: 0.55 }, gloss: { roughness: 0.18 },
   metal: { roughness: 0.32, metalness: 1 }, glass: { roughness: 0.05, transparent: true, opacity: 0.32, depthWrite: false },
@@ -93,7 +112,7 @@ const UNIT_GEO = {
 // Parts in inches, piece frame: origin at the footprint center on the floor.
 // A lamp's glow parts (finish 'glow') keep their own color and light up with
 // it; its bulb (`light`, inches) is where the light comes from.
-function buildAsset(B, asset, item, colorOverride, X) {
+function buildAsset(B, asset, item, colorOverride, X, textures) {
   const sx = (item.w * 12) / asset.w, sy = (item.h * 12) / asset.h, sz = (item.d * 12) / asset.d;
   const scale = new THREE.Matrix4().makeScale(sx / 12, sy / 12, sz / 12);
   const lamp = Array.isArray(asset.light), G = new Batch('glow'), glows = new Map(), shapes = new Set();
@@ -107,7 +126,10 @@ function buildAsset(B, asset, item, colorOverride, X) {
       if (!glows.has(p.color)) glows.set(p.color, glow(X, 'asset', parseInt(p.color.slice(1), 16)));
       G.add(g, glows.get(p.color));
       shapes.add(p.shape);
-    } else B.add(g, colorOverride ?? partMaterial(p.color, p.finish));
+    } else {
+      const own = p.material && (isTexRef(p.material) ? textureMaterial(X.M, textures, p.material) : X.M[p.material]);
+      B.add(g, colorOverride ?? own ?? partMaterial(p.color, p.finish));
+    }
   }
   B.pop(); G.pop();
   if (!lamp) return;
@@ -872,16 +894,18 @@ function usable(g, use) {
 
 // One placed piece, as a group positioned and turned in the room.
 // item: { uid, type, name, w, d, h (feet), x, z (center, feet), y (underside above the floor, feet), rot (degrees clockwise on the plan), color }
-export function buildPiece(M, item, assets = {}) {
+// `textures`: the unit's own, for pieces made of one.
+export function buildPiece(M, item, assets = {}, textures = []) {
   const B = new Batch(`piece-${item.uid}`);
   const X = { M, uid: String(item.uid), hex: swatchHex(item.color), kids: [], use: null };
   const asset = item.type === 'asset' ? assets[item.asset] : null;
-  if (asset) buildAsset(B, asset, item, swatchMaterial(M, item.color), X);
+  if (asset) buildAsset(B, asset, item, mainMaterial(M, item, null, textures), X, textures);
   else {
     const def = catalogByType[item.type] ?? catalogByType.box;
     const F = new Frame(0, -item.d / 2, [1, 0], [0, 1]);
     X.tv = def.tv;
-    (BUILDERS[def.build ?? def.type] ?? BUILDERS.box)(B, M, F, item.w, item.d, item.h, swatchMaterial(M, item.color), X);
+    const build = def.build ?? def.type;
+    (BUILDERS[build] ?? BUILDERS.box)(B, M, F, item.w, item.d, item.h, mainMaterial(M, item, build, textures), X);
   }
   const g = B.build();
   for (const k of X.kids) g.add(k);
